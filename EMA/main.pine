@@ -1,0 +1,75 @@
+//@version=5
+indicator("EMA 20/60/147/200/365 (Color Selectable)", overlay=true, max_lines_count=500)
+// Author: MINGYANG Lu
+// Contact: @ken29578814
+// ==================================================
+// 1) EMA 長度設定（預設你指定的）
+// ==================================================
+grp_len = "EMA Length"
+
+len20  = input.int(20,  "EMA 20",  minval=1, group=grp_len)
+len60  = input.int(60,  "EMA 60",  minval=1, group=grp_len)
+len147 = input.int(147, "EMA 147", minval=1, group=grp_len)
+len200 = input.int(200, "EMA 200", minval=1, group=grp_len)
+len365 = input.int(365, "EMA 365", minval=1, group=grp_len)
+
+// ==================================================
+// 2) 顯示與顏色設定（可選色）
+// ==================================================
+grp_style = "Display & Colors"
+
+// 開關
+show20  = input.bool(true, "Show EMA 20",  group=grp_style)
+show60  = input.bool(true, "Show EMA 60",  group=grp_style)
+show147 = input.bool(true, "Show EMA 147", group=grp_style)
+show200 = input.bool(true, "Show EMA 200", group=grp_style)
+show365 = input.bool(true, "Show EMA 365", group=grp_style)
+
+// 線寬
+w20  = input.int(2, "Width 20",  minval=1, maxval=5, group=grp_style)
+w60  = input.int(2, "Width 60",  minval=1, maxval=5, group=grp_style)
+w147 = input.int(2, "Width 147", minval=1, maxval=5, group=grp_style)
+w200 = input.int(2, "Width 200", minval=1, maxval=5, group=grp_style)
+w365 = input.int(2, "Width 365", minval=1, maxval=5, group=grp_style)
+
+// 顏色（預設已幫你配好，但可自行改）
+c20  = input.color(color.blue,   "Color EMA 20",  group=grp_style)
+c60  = input.color(color.green,  "Color EMA 60",  group=grp_style)
+c147 = input.color(color.yellow, "Color EMA 147", group=grp_style)
+c200 = input.color(color.purple, "Color EMA 200", group=grp_style)
+c365 = input.color(color.red,    "Color EMA 365", group=grp_style)
+
+// ==================================================
+// 3) EMA 計算
+// ==================================================
+ema20  = ta.ema(close, len20)
+ema60  = ta.ema(close, len60)
+ema147 = ta.ema(close, len147)
+ema200 = ta.ema(close, len200)
+ema365 = ta.ema(close, len365)
+
+// ==================================================
+// 4) 畫在主圖上（overlay=true）
+// ==================================================
+plot(show20  ? ema20  : na, title="EMA 20",  color=c20,  linewidth=w20)
+plot(show60  ? ema60  : na, title="EMA 60",  color=c60,  linewidth=w60)
+plot(show147 ? ema147 : na, title="EMA 147", color=c147, linewidth=w147)
+plot(show200 ? ema200 : na, title="EMA 200", color=c200, linewidth=w200)
+plot(show365 ? ema365 : na, title="EMA 365", color=c365, linewidth=w365)
+
+// ==================================================
+// 5)（可選）排列狀態提示：多頭 / 空頭 / 混合
+// ==================================================
+grp_state = "Trend Helper"
+showTrend = input.bool(true, "Show EMA Stack State", group=grp_state)
+
+bullStack = ema20 > ema60 and ema60 > ema147 and ema147 > ema200 and ema200 > ema365
+bearStack = ema20 < ema60 and ema60 < ema147 and ema147 < ema200 and ema200 < ema365
+
+trendText = bullStack ? "BULL STACK" : bearStack ? "BEAR STACK" : "MIXED"
+
+// 左上角小表格顯示
+var table t = table.new(position.top_left, 1, 1)
+
+if showTrend and barstate.islast
+    table.cell(t, 0, 0, trendText, text_color=color.white, bgcolor=color.new(color.black, 80))
