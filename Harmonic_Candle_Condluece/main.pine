@@ -1,0 +1,99 @@
+//@version=5
+indicator("RSI Divergence + MTF RSI Table", overlay=true, max_labels_count=500)
+
+//==============================
+// Inputs
+//==============================
+grpRsi = "RSI Status"
+rsiLen = input.int(14, "RSI Length", minval=2, group=grpRsi)
+obLevel = input.int(75, "Overbought", minval=50, maxval=100, group=grpRsi)
+osLevel = input.int(25, "Oversold", minval=0, maxval=50, group=grpRsi)
+
+grpDiv = "Divergence"
+showDiv = input.bool(true, "Show Divergence Marks", group=grpDiv)
+pivLeft = input.int(5, "Pivot Left", minval=1, group=grpDiv)
+pivRight = input.int(5, "Pivot Right", minval=1, group=grpDiv)
+divBullColor = input.color(color.new(color.purple, 0), "Bullish Divergence Color", group=grpDiv)
+divBearColor = input.color(color.new(color.lime, 0), "Bearish Divergence Color", group=grpDiv)
+
+grpShow = "Display"
+showTable = input.bool(true, "Show MTF RSI Table", group=grpShow)
+tableBg = input.color(color.new(color.gray, 70), "Table Background", group=grpShow)
+
+//==============================
+// RSI + divergence
+//==============================
+rsi = ta.rsi(close, rsiLen)
+ph = ta.pivothigh(high, pivLeft, pivRight)
+pl = ta.pivotlow(low, pivLeft, pivRight)
+
+rsiAtHigh = rsi[pivRight]
+rsiAtLow = rsi[pivRight]
+
+var float lastHighPrice = na
+var float lastHighRsi = na
+var float lastLowPrice = na
+var float lastLowRsi = na
+
+bearDiv = false
+bullDiv = false
+
+if not na(ph)
+    bearDiv := not na(lastHighPrice) and ph > lastHighPrice and rsiAtHigh < lastHighRsi and rsiAtHigh >= obLevel
+    lastHighPrice := ph
+    lastHighRsi := rsiAtHigh
+
+if not na(pl)
+    bullDiv := not na(lastLowPrice) and pl < lastLowPrice and rsiAtLow > lastLowRsi and rsiAtLow <= osLevel
+    lastLowPrice := pl
+    lastLowRsi := rsiAtLow
+
+plotshape(showDiv and bearDiv, title="Bearish Divergence", style=shape.labeldown, location=location.abovebar, offset=-pivRight, color=divBearColor, textcolor=color.white, size=size.small)
+plotshape(showDiv and bullDiv, title="Bullish Divergence", style=shape.labelup, location=location.belowbar, offset=-pivRight, color=divBullColor, textcolor=color.white, size=size.small)
+
+barcolor(showDiv and bearDiv ? divBearColor : showDiv and bullDiv ? divBullColor : na, offset=-pivRight)
+
+//==============================
+// MTF RSI table
+//==============================
+f_rsi(tf) =>
+    request.security(syminfo.tickerid, tf, ta.rsi(close, rsiLen))
+
+f_status(v) =>
+    v >= obLevel ? "OB" : v <= osLevel ? "OS" : "Neutral"
+
+f_status_color(v) =>
+    v >= obLevel ? color.new(color.red, 0) : v <= osLevel ? color.new(color.green, 0) : color.new(color.white, 0)
+
+var table t = table.new(position.bottom_right, 3, 6, border_width=1)
+
+if showTable and barstate.islast
+    table.cell(t, 0, 0, "TF", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 1, 0, "RSI", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 2, 0, "Status", text_color=color.white, bgcolor=tableBg)
+
+    r5 = f_rsi("5")
+    r15 = f_rsi("15")
+    r60 = f_rsi("60")
+    r240 = f_rsi("240")
+    r1d = f_rsi("D")
+
+    table.cell(t, 0, 1, "5m", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 1, 1, str.tostring(r5, "#.##"), text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 2, 1, f_status(r5), text_color=f_status_color(r5), bgcolor=tableBg)
+
+    table.cell(t, 0, 2, "15m", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 1, 2, str.tostring(r15, "#.##"), text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 2, 2, f_status(r15), text_color=f_status_color(r15), bgcolor=tableBg)
+
+    table.cell(t, 0, 3, "1h", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 1, 3, str.tostring(r60, "#.##"), text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 2, 3, f_status(r60), text_color=f_status_color(r60), bgcolor=tableBg)
+
+    table.cell(t, 0, 4, "4h", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 1, 4, str.tostring(r240, "#.##"), text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 2, 4, f_status(r240), text_color=f_status_color(r240), bgcolor=tableBg)
+
+    table.cell(t, 0, 5, "1D", text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 1, 5, str.tostring(r1d, "#.##"), text_color=color.white, bgcolor=tableBg)
+    table.cell(t, 2, 5, f_status(r1d), text_color=f_status_color(r1d), bgcolor=tableBg)

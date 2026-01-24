@@ -1,0 +1,101 @@
+//@version=5
+indicator("EMA Convergence/Divergence (Spread + Slope)", overlay=true, max_labels_count=500)
+
+// ─────────────────────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────────────────────
+grpEma = "EMA Settings"
+len1 = input.int(20,  "EMA 1", group=grpEma, minval=1)
+len2 = input.int(60,  "EMA 2", group=grpEma, minval=1)
+len3 = input.int(147, "EMA 3", group=grpEma, minval=1)
+len4 = input.int(200, "EMA 4", group=grpEma, minval=1)
+len5 = input.int(365, "EMA 5", group=grpEma, minval=1)
+
+grpLogic = "Logic"
+smoothLen   = input.int(5, "Smoothing (Spread/Slope)", group=grpLogic, minval=1)
+slopeLen    = input.int(5, "Slope Lookback", group=grpLogic, minval=1)
+flatThresh  = input.float(0.0, "Flat threshold (0=off)", group=grpLogic, step=0.0001) 
+useBg       = input.bool(true, "Background Regime Highlight", group=grpLogic)
+showSignals = input.bool(true, "Show Convergence/Divergence Marks", group=grpLogic)
+requireInBand = input.bool(false, "Prep Requires In-Band", group=grpLogic)
+convergePct = input.float(0.003, "Converged Spread % (e.g. 0.003=0.3%)", group=grpLogic, minval=0.0001, step=0.0001)
+
+// ─────────────────────────────────────────────────────────────
+// EMA calc
+// ─────────────────────────────────────────────────────────────
+ema1 = ta.ema(close, len1)
+ema2 = ta.ema(close, len2)
+ema3 = ta.ema(close, len3)
+ema4 = ta.ema(close, len4)
+ema5 = ta.ema(close, len5)
+
+// Plot EMAs (default colors, user can change in settings)
+plot(ema1, title="EMA 20", linewidth=2)
+plot(ema2, title="EMA 60", linewidth=2)
+plot(ema3, title="EMA 147", linewidth=2)
+plot(ema4, title="EMA 200", linewidth=2)
+plot(ema5, title="EMA 365", linewidth=2)
+
+
+// ─────────────────────────────────────────────────────────────
+// Spread + slope
+// ─────────────────────────────────────────────────────────────
+emaMax = math.max(math.max(math.max(math.max(ema1, ema2), ema3), ema4), ema5)
+emaMin = math.min(math.min(math.min(math.min(ema1, ema2), ema3), ema4), ema5)
+
+spreadRaw = emaMax - emaMin
+spread    = ta.ema(spreadRaw, smoothLen)
+
+// spread slope (positive = diverging, negative = converging)
+spreadSlopeRaw = spread - spread[1]
+spreadSlope    = ta.ema(spreadSlopeRaw, smoothLen)
+
+// EMA group direction using average slope
+s1 = ema1 - ema1[slopeLen]
+s2 = ema2 - ema2[slopeLen]
+s3 = ema3 - ema3[slopeLen]
+s4 = ema4 - ema4[slopeLen]
+s5 = ema5 - ema5[slopeLen]
+avgSlopeRaw = (s1 + s2 + s3 + s4 + s5) / 5.0
+avgSlope    = ta.ema(avgSlopeRaw, smoothLen)
+
+// Price position vs EMA band
+inBand = close <= emaMax and close >= emaMin
+aboveBand = close > emaMax
+belowBand = close < emaMin
+
+// Optional "flat" check (avoid noise if you want)
+isFlat = flatThresh > 0 ? math.abs(avgSlope) <= flatThresh : false
+
+// Regimes
+bullExpand = aboveBand and avgSlope > 0 and spreadSlope > 0 and not isFlat
+bearExpand = belowBand and avgSlope < 0 and spreadSlope > 0 and not isFlat
+converging = spreadSlope < 0
+
+// "Prepare to diverge" markers (was converged, then spreadSlope turns up)
+isConverged = spread / close <= convergePct
+prepBase = (not requireInBand or inBand) and isConverged[1] and ta.crossover(spreadSlope, 0) and not isFlat
+prepBull = prepBase and avgSlope > 0
+prepBear = prepBase and avgSlope < 0
+
+// ─────────────────────────────────────────────────────────────
+// Visual: background + status label
+// ─────────────────────────────────────────────────────────────
+bgBull = color.new(color.green, 88)
+bgBear = color.new(color.red,   88)
+bgConv = color.new(color.gray,  90)
+
+bgcolor(not useBg ? na : bullExpand ? bgBull : bearExpand ? bgBear : converging ? bgConv : na)
+
+// Small status in Data Window
+plot(spread, "EMA Spread", display=display.data_window)
+plot(spreadSlope, "Spread Slope", display=display.data_window)
+plot(avgSlope, "EMA Avg Slope", display=display.data_window)
+
+// Optional: alerts
+alertcondition(bullExpand, "Bullish Expansion", "EMA bullish expansion (above band, slopes up, spread expanding)")
+alertcondition(bearExpand, "Bearish Expansion", "EMA bearish expansion (below band, slopes down, spread expanding)")
+alertcondition(converging, "Converging", "EMA spread is converging (compression)")
+
+plotshape(showSignals and prepBull, title="Prepare Diverge Up", style=shape.labelup, location=location.belowbar, color=color.new(color.green, 0), textcolor=color.white, size=size.normal, text="PREP↑")
+plotshape(showSignals and prepBear, title="Prepare Diverge Down", style=shape.labeldown, location=location.abovebar, color=color.new(color.red, 0), textcolor=color.white, size=size.normal, text="PREP↓")
