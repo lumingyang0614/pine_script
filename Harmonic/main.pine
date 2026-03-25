@@ -27,6 +27,9 @@ alt_ratio      = input.float(1.0, "交替原則強度 (斜率倍率) [嚴格建�
 use_trend      = input.bool(false,  "啟用趨勢濾網 (建議開)", group=grp_strict)
 trend_len      = input.int(50,     "趨勢均線長度", minval=10, group=grp_strict)
 min_score      = input.int(30,     "最低品質分數 (0-100) [嚴格建議 75~90]", minval=0, maxval=100, group=grp_strict)
+confirm_on_reject = input.bool(true, "Confirm on PRZ reject", group=grp_strict)
+reject_atr_len    = input.int(14, "Reject ATR length", minval=1, group=grp_strict)
+reject_atr_mult   = input.float(0.15, "Reject move (ATR)", minval=0.0, step=0.05, group=grp_strict)
 
 grp_draw = "繪圖"
 line_future = input.int(12, "PRZ 預測寬度", minval=1, group=grp_draw)
@@ -363,14 +366,21 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
 
             int maxLook = bar_index - tC
             maxLook := math.max(0, maxLook)
-            // Search from current bar back to C for first PRZ touch.
+            // Search all touches and keep the most extreme one inside PRZ.
+            // This improves "push into PRZ then reject" detection.
+            float best_touch_price = na
             for i = 0 to maxLook
-                if (low[i] <= d_high and high[i] >= d_low)
-                    is_trig := true
-                    trigger_bar := bar_index - i
-                    trigger_i := i
-                    trigger_price := is_bull ? low[i] : high[i]
-                    break
+                bool touched = low[i] <= d_high and high[i] >= d_low
+                if touched
+                    float curr_touch = is_bull ? low[i] : high[i]
+                    bool better_touch = na(best_touch_price) or (is_bull ? curr_touch < best_touch_price : curr_touch > best_touch_price)
+                    if better_touch
+                        best_touch_price := curr_touch
+                        trigger_i := i
+            if not na(trigger_i)
+                is_trig := true
+                trigger_bar := bar_index - trigger_i
+                trigger_price := best_touch_price
             bool prz_breach = false
             bool d_is_extreme = true
             if is_trig
@@ -403,8 +413,13 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
                 time_d_ok := score_time_sym(TBC, TCD, time_sym) > 0
             bool rev_ok = is_trig ? reversal_ok_at(bar_index - trigger_bar, is_bull) : true
             bool time_expired = (not is_trig) and (TBC > 0) and (float(bar_index - tC) > TBC * time_limit_mult)
+            float reject_move = ta.atr(reject_atr_len) * reject_atr_mult
+            bool reject_ok = false
+            if is_trig and not na(trigger_i) and trigger_i > 0
+                reject_ok := is_bull ? (close >= low[trigger_i] + reject_move) : (close <= high[trigger_i] - reject_move)
+            bool confirm_ok = is_trig ? ((rev_ok and d_is_extreme and not prz_breach) or (confirm_on_reject and reject_ok and not prz_breach)) : false
             // allow_draw gates both predicted and confirmed outputs.
-            bool allow_draw = (is_trig ? (rev_ok and d_is_extreme and not prz_breach) : (time_d_ok and not time_expired)) and not array.includes(drawn_keys, key)
+            bool allow_draw = (is_trig ? confirm_ok : (time_d_ok and not time_expired)) and not array.includes(drawn_keys, key)
 
             if allow_draw and (d_high + d_low) / 2.0 > 0
                 array.push(drawn_keys, key)
