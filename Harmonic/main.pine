@@ -7,19 +7,19 @@ indicator("Harmonic Pro+ (Strict) - Multi-Scale Auto Scanner", overlay=true, max
 grp_scan = "掃描設定"
 scan_min  = input.int(10,  "最小掃描回溯", minval=5,  group=grp_scan)
 scan_max  = input.int(500, "最大掃描回溯", minval=10, group=grp_scan)
-scan_step = input.int(10,  "掃描步進 (更密)", minval=5, group=grp_scan) // 你想「更多時間區間」→ 用更小 step
+scan_step = input.int(5,  "掃描步進 (更密)", minval=2, group=grp_scan) // 你想「更多時間區間」→ 用更小 step
 
 grp_strict = "嚴格濾網"
-tol_pct        = input.float(6.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
-time_sym_pct   = input.float(45.0, "時間對稱容忍 (%) [嚴格建議 35~55]", minval=0.0, maxval=200.0, group=grp_strict)
-time_limit_mult = input.float(1.5, "D timeout mult (BC)", minval=0.5, group=grp_strict)
+tol_pct        = input.float(5.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
+time_sym_pct   = input.float(100.0, "時間對稱容忍 (%) [嚴格建議 35~55]", minval=0.0, maxval=200.0, group=grp_strict)
+time_limit_mult = input.float(4.0, "D timeout mult (BC)", minval=0.5, group=grp_strict)
 pin_wick_ratio = input.float(2.0, "Pin bar wick/body", minval=1.0, group=grp_strict)
 pin_body_max   = input.float(0.35, "Pin bar max body %", minval=0.05, maxval=0.8, group=grp_strict)
 rev_max_offset = input.int(200, "Reversal max offset", minval=1, group=grp_strict)
-alt_ratio      = input.float(1.25, "交替原則強度 (斜率倍率) [嚴格建議 1.2~1.5]", minval=1.0, group=grp_strict)
-use_trend      = input.bool(true,  "啟用趨勢濾網 (建議開)", group=grp_strict)
+alt_ratio      = input.float(1.0, "交替原則強度 (斜率倍率) [嚴格建議 1.2~1.5]", minval=1.0, group=grp_strict)
+use_trend      = input.bool(false,  "啟用趨勢濾網 (建議開)", group=grp_strict)
 trend_len      = input.int(50,     "趨勢均線長度", minval=10, group=grp_strict)
-min_score      = input.int(80,     "最低品質分數 (0-100) [嚴格建議 75~90]", minval=0, maxval=100, group=grp_strict)
+min_score      = input.int(30,     "最低品質分數 (0-100) [嚴格建議 75~90]", minval=0, maxval=100, group=grp_strict)
 
 grp_draw = "繪圖"
 line_future = input.int(12, "PRZ 預測寬度", minval=1, group=grp_draw)
@@ -139,7 +139,7 @@ draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score) =>
     line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed)
     line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed)
     string txt = show_score ? (name + " (" + str.tostring(int(score)) + ")") : name
-    label.new(tD, pD, txt, color=color.new(c, 100), textcolor=c, style=is_bull ? label.style_label_up : label.style_label_down, size=size.small)
+    label.new(tD, pD, txt, color=color.new(c, 100), textcolor=c, style=is_bull ? label.style_label_up : label.style_label_down, size=size.large)
 
 
 make_key(tX, tA, tB, tC, pn, is_bull, is_trig) =>
@@ -223,7 +223,7 @@ draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score,
     add_pred_line(key, line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed))
     add_pred_line(key, line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed))
     string txt = show_score ? (name + " (" + str.tostring(int(score)) + ")") : name
-    add_pred_label(key, label.new(tD, pD, txt, color=color.new(c, 100), textcolor=c, style=is_bull ? label.style_label_up : label.style_label_down, size=size.small))
+    add_pred_label(key, label.new(tD, pD, txt, color=color.new(c, 100), textcolor=c, style=is_bull ? label.style_label_up : label.style_label_down, size=size.large))
 
 draw_trade_levels_pred(tD, entry, tp1, tp2, sl, pn, is_bull, key) =>
     if show_levels
@@ -241,10 +241,10 @@ draw_trade_levels_pred(tD, entry, tp1, tp2, sl, pn, is_bull, key) =>
         add_pred_line(key, line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed))
         add_pred_line(key, line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed))
         add_pred_line(key, line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed))
-        add_pred_label(key, label.new(t2, entry, prefix + "Entry: " + str.tostring(entry, format.mintick), color=color.new(color.gray, 85), textcolor=color.gray, style=label.style_label_left, size=size.tiny))
-        add_pred_label(key, label.new(t2, tp1, prefix + "TP1: " + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.tiny))
-        add_pred_label(key, label.new(t2, tp2, prefix + "TP2: " + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.tiny))
-        add_pred_label(key, label.new(t2, sl,  prefix + "SL: " + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 85), textcolor=sl_c, style=label.style_label_left, size=size.tiny))
+        add_pred_label(key, label.new(t2, entry, prefix + "Entry: " + str.tostring(entry, format.mintick), color=color.new(color.gray, 85), textcolor=color.gray, style=label.style_label_left, size=size.normal))
+        add_pred_label(key, label.new(t2, tp1, prefix + "TP1: " + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal))
+        add_pred_label(key, label.new(t2, tp2, prefix + "TP2: " + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal))
+        add_pred_label(key, label.new(t2, sl,  prefix + "SL: " + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 85), textcolor=sl_c, style=label.style_label_left, size=size.normal))
 
 sl_ratio_for(pn, xc_ratio) =>
     if pn == "Bat"
@@ -265,9 +265,11 @@ sl_ratio_for(pn, xc_ratio) =>
     else
         1.272
 
-sl_price(pn, is_bull, pX, pC, XA) =>
+sl_price(pn, is_bull, pX, pC, XA, cd) =>
     if pn == "Gartley" or pn == "Cypher"
         pX
+    else if pn == "5-0"
+        is_bull ? pC + ((1 - 1.272) * cd) : pC - ((1 - 1.272) * cd)
     else
         float xc_ratio = XA > 0 ? math.abs(pC - pX) / XA : na
         float sl_ratio = sl_ratio_for(pn, xc_ratio)
@@ -291,10 +293,10 @@ draw_trade_levels(tD, entry, tp1, tp2, sl, pn, is_bull) =>
         line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed)
         line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed)
         line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed)
-        label.new(t2, entry, prefix + "Entry: " + str.tostring(entry, format.mintick), color=color.new(color.gray, 85), textcolor=color.gray, style=label.style_label_left, size=size.tiny)
-        label.new(t2, tp1, prefix + "TP1: " + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.tiny)
-        label.new(t2, tp2, prefix + "TP2: " + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.tiny)
-        label.new(t2, sl,  prefix + "SL: " + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 85), textcolor=sl_c, style=label.style_label_left, size=size.tiny)
+        label.new(t2, entry, prefix + "Entry: " + str.tostring(entry, format.mintick), color=color.new(color.gray, 85), textcolor=color.gray, style=label.style_label_left, size=size.normal)
+        label.new(t2, tp1, prefix + "TP1: " + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal)
+        label.new(t2, tp2, prefix + "TP2: " + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal)
+        label.new(t2, sl,  prefix + "SL: " + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 85), textcolor=sl_c, style=label.style_label_left, size=size.normal)
 
 // =====================================================
 // 2) PRZ 計算 + 觸發判斷（保留你原本的 XD/BD 交集）
@@ -371,20 +373,20 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
             bool time_expired = (not is_trig) and (TBC > 0) and (float(bar_index - tC) > TBC * time_limit_mult)
             bool allow_draw = (is_trig ? (rev_ok and d_is_extreme and not prz_breach) : (time_d_ok and not time_expired)) and not array.includes(drawn_keys, key)
 
-            if allow_draw
+            if allow_draw and (d_high + d_low) / 2.0 > 0
                 array.push(drawn_keys, key)
                 trim_keys_if_needed()
 
                 float entry = (d_high + d_low) / 2.0
                 float ad = math.abs(entry - pA)
                 float cd = math.abs(entry - pC)
-                float tp_base = (pn == "Cypher" or pn == "Shark_113" or pn == "Shark_886") ? cd : ad
-                bool shark_tp = pn == "Shark_113" or pn == "Shark_886"
+                float tp_base = (pn == "Cypher" or pn == "Shark_113" or pn == "Shark_886" or pn =="5-0") ? cd : ad
+                bool shark_tp = pn == "Shark_113" or pn == "Shark_886"or pn == "5-0"
                 float tp_r1 = shark_tp ? 0.5 : 0.382
                 float tp_r2 = shark_tp ? 0.886 : 0.618
                 float tp1 = is_bull ? entry + tp_base * tp_r1 : entry - tp_base * tp_r1
                 float tp2 = is_bull ? entry + tp_base * tp_r2 : entry - tp_base * tp_r2
-                float sl = sl_price(pn, is_bull, pX, pC, XA)
+                float sl = sl_price(pn, is_bull, pX, pC, XA, cd)
 
                 if (not is_trig)
                     // ???????????? + ??
@@ -521,7 +523,12 @@ run_scanner(len) =>
                             XD_hi := 0.786*(1+tol), XD_lo := 0.786*(1-tol)
                             BD_hi := 2.0*(1+tol),  BD_lo := 1.272*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.414*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
-
+                        
+                        if pn == "None" and in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) and in_range(AC, 1.618*(1-tol), 2.24*(1+tol))
+                            pn := "5-0"
+                            XD_hi := 3*(1+tol), XD_lo := 0*(1-tol)
+                            BD_hi := 0.5*(1+tol),  BD_lo := 0.5*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
+                            s_ratio := (score_in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(AC, 1.618*(1-tol), 2.24*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
                         // 最終分數（嚴格：比例 + 時間對稱 + 交替）
                         if pn != "None"
                             float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
@@ -538,37 +545,101 @@ run_scanner(len) =>
 cleanup_pred()
 // 你也可以把下面再加得更密（會更吃效能）。
 run_scanner(10)
+run_scanner(15)
 run_scanner(20)
+run_scanner(25)
 run_scanner(30)
+run_scanner(35)
 run_scanner(40)
+run_scanner(45)
 run_scanner(50)
+run_scanner(55)
 run_scanner(60)
+run_scanner(65)
 run_scanner(70)
+run_scanner(75)
 run_scanner(80)
+run_scanner(85)
 run_scanner(90)
+run_scanner(95)
 run_scanner(100)
+run_scanner(105)
 run_scanner(110)
+run_scanner(115)
 run_scanner(120)
+run_scanner(125)
 run_scanner(130)
+run_scanner(135)
 run_scanner(140)
+run_scanner(145)
 run_scanner(150)
+run_scanner(155)
 run_scanner(160)
+run_scanner(165)
 run_scanner(170)
+run_scanner(175)
 run_scanner(180)
+run_scanner(185)
 run_scanner(190)
+run_scanner(195)
 run_scanner(200)
+run_scanner(205)
+run_scanner(210)
+run_scanner(215)
 run_scanner(220)
+run_scanner(225)
+run_scanner(230)
+run_scanner(235)
 run_scanner(240)
+run_scanner(245)
+run_scanner(250)
+run_scanner(255)
 run_scanner(260)
+run_scanner(265)
+run_scanner(270)
+run_scanner(275)
 run_scanner(280)
+run_scanner(285)
+run_scanner(290)
+run_scanner(295)
 run_scanner(300)
+run_scanner(305)
+run_scanner(310)
+run_scanner(315)
 run_scanner(320)
+run_scanner(325)
+run_scanner(330)
+run_scanner(335)
 run_scanner(340)
+run_scanner(345)
+run_scanner(350)
+run_scanner(355)
 run_scanner(360)
+run_scanner(365)
+run_scanner(370)
+run_scanner(375)
 run_scanner(380)
+run_scanner(385)
+run_scanner(390)
+run_scanner(395)
 run_scanner(400)
+run_scanner(405)
+run_scanner(410)
+run_scanner(415)
 run_scanner(420)
+run_scanner(425)
+run_scanner(430)
+run_scanner(435)
 run_scanner(440)
+run_scanner(445)
+run_scanner(450)
+run_scanner(455)
 run_scanner(460)
+run_scanner(465)
+run_scanner(470)
+run_scanner(475)
 run_scanner(480)
+run_scanner(485)
+run_scanner(490)
+run_scanner(495)
 run_scanner(500)
