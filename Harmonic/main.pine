@@ -17,12 +17,12 @@ scan_max  = input.int(500, "最大掃描回溯", minval=10, group=grp_scan)
 scan_step = input.int(5,  "掃描步進 (更密)", minval=2, group=grp_scan) // 你想「更多時間區間」→ 用更小 step
 
 grp_strict = "嚴格濾網"
-tol_pct        = input.float(5.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
-time_sym_pct   = input.float(100.0, "時間對稱容忍 (%) [嚴格建議 35~55]", minval=0.0, maxval=200.0, group=grp_strict)
+tol_pct        = input.float(8.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
+time_sym_pct   = input.float(150.0, "時間對稱容忍 (%) [嚴格建議 35~55]", minval=0.0, maxval=200.0, group=grp_strict)
 time_limit_mult = input.float(4.0, "D timeout mult (BC)", minval=0.5, group=grp_strict)
-pin_wick_ratio = input.float(2.0, "Pin bar wick/body", minval=1.0, group=grp_strict)
+pin_wick_ratio = input.float(1.8, "Pin bar wick/body", minval=1.0, group=grp_strict)
 pin_body_max   = input.float(0.35, "Pin bar max body %", minval=0.05, maxval=0.8, group=grp_strict)
-rev_max_offset = input.int(200, "Reversal max offset", minval=1, group=grp_strict)
+rev_max_offset = input.int(300, "Reversal max offset", minval=1, group=grp_strict)
 alt_ratio      = input.float(1.0, "交替原則強度 (斜率倍率) [嚴格建議 1.2~1.5]", minval=1.0, group=grp_strict)
 use_trend      = input.bool(false,  "啟用趨勢濾網 (建議開)", group=grp_strict)
 trend_len      = input.int(50,     "趨勢均線長度", minval=10, group=grp_strict)
