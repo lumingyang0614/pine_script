@@ -1,9 +1,16 @@
 //@version=5
 indicator("Harmonic Pro+ (Strict) - Multi-Scale Auto Scanner", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
+// Pipeline summary:
+// 1) Scan pivots across multiple right-bar lengths.
+// 2) Validate XA/AB/BC structure and identify harmonic family.
+// 3) Build PRZ from XD/BD overlap, then gate by timing/reversal quality.
+// 4) Draw predicted or confirmed pattern and trade levels.
+// 5) Use keys to deduplicate and clean old prediction objects.
 
 // =====================================================
 // 0) 設定：嚴格版（加入 時間對稱/交替原則/趨勢濾網/品質分數）
 // =====================================================
+// 0) Inputs: scan range, strict filters, and drawing options.
 grp_scan = "掃描設定"
 scan_min  = input.int(10,  "最小掃描回溯", minval=5,  group=grp_scan)
 scan_max  = input.int(500, "最大掃描回溯", minval=10, group=grp_scan)
@@ -26,6 +33,7 @@ line_future = input.int(12, "PRZ 預測寬度", minval=1, group=grp_draw)
 show_prz_box = input.bool(true, "顯示 PRZ 方框(未觸發)", group=grp_draw)
 show_score   = input.bool(true, "在標籤顯示分數", group=grp_draw)
 
+// Display toggles and color theme.
 show_levels  = input.bool(true, "Show TP/SL", group=grp_draw)
 color_bull = color.new(#00ffbb, 0)
 color_bear = color.new(#ff5252, 0)
@@ -34,6 +42,9 @@ tol = tol_pct / 100.0
 time_sym = time_sym_pct / 100.0
 
 // 去重 key
+// Runtime caches:
+// - drawn_keys: dedupe of already rendered structures.
+// - pred_*: bookkeeping for predicted lines/labels/boxes to allow cleanup.
 var string[] drawn_keys = array.new_string()
 var string[] pred_keys = array.new_string()
 var int[] pred_tB = array.new_int()
@@ -48,6 +59,7 @@ var box[] pred_boxes = array.new_box()
 
 max_keys = 1200  // 防止 key 無限長（Pine 內存）
 trim_keys_if_needed() =>
+    // Keep array size bounded to avoid memory growth on long histories.
     if array.size(drawn_keys) > max_keys
         // 移除前面舊的 20%
         int cut = int(max_keys * 0.2)
@@ -57,6 +69,7 @@ trim_keys_if_needed() =>
 // =====================================================
 // 1) 工具函數
 // =====================================================
+// 1) Utility helpers: range checks, scoring, reversal checks, and drawing helpers.
 in_range(v, lo, hi) =>
     v >= lo and v <= hi
 
@@ -65,12 +78,14 @@ near(v, target, tolerance) =>
 
 // 將 ratio 偏離程度轉為分數（越接近越高）
 score_near(v, target, tolerance) =>
+    // Return 100 at exact target, linearly decays to 0 at tolerance bound.
     // tolerance: 允許偏離比例，例如 0.06
     float err = math.abs(v - target) / target
     // 只要超過容忍 → 0 分；在容忍內 → 線性 100~0
     err <= tolerance ? (100.0 * (1.0 - err / tolerance)) : 0.0
 
 score_in_range(v, lo, hi) =>
+    // Score by proximity to midpoint in [lo, hi]; outside range => 0.
     // 在 range 內：距離中心越近分越高；range 外 0
     if v < lo or v > hi
         0.0
@@ -82,6 +97,7 @@ score_in_range(v, lo, hi) =>
 
 // 時間對稱：AB 與 BC 的「時間長度」不要差太誇張
 score_time_sym(TAB, TBC, tolerance_sym) =>
+    // Compare AB and BC durations by relative difference.
     // tolerance_sym: 允許 AB vs BC 的相對差異，例如 0.45
     float denom = math.max(1.0, (TAB + TBC) / 2.0)
     float rel = math.abs(TAB - TBC) / denom
@@ -89,6 +105,7 @@ score_time_sym(TAB, TBC, tolerance_sym) =>
 
 // 交替原則：AB 與 BC 斜率至少一邊要明顯更陡（或更緩）
 score_alternation(AB, BC, TAB, TBC, ratio_mult) =>
+    // Alternation rule: AB and BC should have meaningful slope contrast.
     float s1 = AB / math.max(1.0, TAB)
     float s2 = BC / math.max(1.0, TBC)
     bool ok = (s1 >= s2 * ratio_mult) or (s2 >= s1 * ratio_mult)
@@ -120,6 +137,7 @@ is_bear_pin(o, h, l, c) =>
     body / bar_range <= pin_body_max and upper_w >= body * pin_wick_ratio
 
 reversal_ok_at(index_offset, is_bull) =>
+    // Reversal validator near D: engulfing / pin bar / close-break.
     if index_offset < 1 or index_offset + 1 > rev_max_offset
         false
     else
@@ -131,6 +149,7 @@ reversal_ok_at(index_offset, is_bull) =>
         engulf or pin or close_break
 
 draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score) =>
+    // Draw a confirmed XABCD pattern.
     c = is_bull ? color_bull : color_bear
     line.new(tX, pX, tA, pA, color=c, width=1)
     line.new(tA, pA, tB, pB, color=c, width=1)
@@ -149,6 +168,7 @@ make_base_key(tX, tA, tB, tC, pn, is_bull) =>
     str.tostring(tX)+"_"+str.tostring(tA)+"_"+str.tostring(tB)+"_"+str.tostring(tC)+"_"+pn+"_"+(is_bull?"B":"S")
 
 add_pred_pattern(key, tB, tC, pn) =>
+    // Keep only one predicted record per logical pattern key.
     if not array.includes(pred_keys, key)
         array.push(pred_keys, key)
         array.push(pred_tB, tB)
@@ -168,6 +188,7 @@ add_pred_box(key, b) =>
     array.push(pred_boxes, b)
 
 delete_pred_objects(key) =>
+    // Remove all lines/labels/boxes associated with one prediction key.
     if array.size(pred_line_keys) > 0
         for i = array.size(pred_line_keys) - 1 to 0
             if array.get(pred_line_keys, i) == key
@@ -198,6 +219,7 @@ remove_pred_by_key(key) =>
                 array.remove(pred_pn, i)
 
 cleanup_pred() =>
+    // Purge predictions whose time symmetry failed or timeout expired.
     if array.size(pred_keys) > 0
         for i = array.size(pred_keys) - 1 to 0
             string key = array.get(pred_keys, i)
@@ -301,7 +323,13 @@ draw_trade_levels(tD, entry, tp1, tp2, sl, pn, is_bull) =>
 // =====================================================
 // 2) PRZ 計算 + 觸發判斷（保留你原本的 XD/BD 交集）
 // =====================================================
+// 2) PRZ logic: build overlap zone, detect touch, then route to predicted/confirmed flow.
 target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r, BD_high_r, pn, is_bull, score) =>
+    // PRZ engine:
+    // 1) derive XD and BD price zones
+    // 2) take overlap as final PRZ
+    // 3) detect whether PRZ has already been touched (is_trig)
+    // 4) draw predicted or confirmed objects accordingly
     if pn != "None"
         // XD 區間（以 X 為 anchor）
         float d_xd_low  = is_bull ? pX + ((1 - XD_low_r)  * XA) : pX - ((1 - XD_low_r)  * XA)
@@ -323,6 +351,7 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
         float d_low  = math.max(d_xd_low, d_bd_low)
         float d_high = math.min(d_xd_high, d_bd_high)
 
+        // Continue only when XD and BD overlap into a valid PRZ.
         if d_low <= d_high
             // 歷史觸發檢查：從 C 到現在
             bool is_trig = false
@@ -332,6 +361,7 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
 
             int maxLook = bar_index - tC
             maxLook := math.max(0, maxLook)
+            // Search from current bar back to C for first PRZ touch.
             for i = 0 to maxLook
                 if (low[i] <= d_high and high[i] >= d_low)
                     is_trig := true
@@ -371,6 +401,7 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
                 time_d_ok := score_time_sym(TBC, TCD, time_sym) > 0
             bool rev_ok = is_trig ? reversal_ok_at(bar_index - trigger_bar, is_bull) : true
             bool time_expired = (not is_trig) and (TBC > 0) and (float(bar_index - tC) > TBC * time_limit_mult)
+            // allow_draw gates both predicted and confirmed outputs.
             bool allow_draw = (is_trig ? (rev_ok and d_is_extreme and not prz_breach) : (time_d_ok and not time_expired)) and not array.includes(drawn_keys, key)
 
             if allow_draw and (d_high + d_low) / 2.0 > 0
@@ -389,14 +420,16 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
                 float sl = sl_price(pn, is_bull, pX, pC, XA, cd)
 
                 if (not is_trig)
-                    // ???????????? + ??
+                    // Prediction path: PRZ exists but no valid D confirmation yet.
+                    // Draw prediction and keep it tracked for future cleanup.
                     add_pred_pattern(base_key, tB, tC, pn)
                     if show_prz_box
                         add_pred_box(base_key, box.new(bar_index, d_high, bar_index + line_future, d_low, border_color=color.yellow, bgcolor=color.new(color.yellow, 85)))
                     draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, bar_index, (d_high + d_low) / 2.0, pn, is_bull, score, base_key)
                     draw_trade_levels_pred(bar_index, entry, tp1, tp2, sl, pn, is_bull, base_key)
                 else
-                    // ????????????
+                    // Confirmation path: remove prediction and render final structure.
+                    // Remove old prediction objects, then draw confirmed pattern.
                     remove_pred_by_key(base_key)
                     draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, trigger_bar, trigger_price, pn, is_bull, score)
                     draw_trade_levels(trigger_bar, entry, tp1, tp2, sl, pn, is_bull)
@@ -407,7 +440,9 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
 // 注意：ta.pivot 的 rightbars 不能很好地動態迴圈，
 // 所以我們用「密集手動展開」來做到更多尺度掃描。
 // =====================================================
+// 3) Scanner core: identify candidate XABC and score pattern quality.
 run_scanner(len) =>
+    // Scanner for one rightbars length. Called repeatedly for multi-scale search.
     // 固定 left=2，right=len
     float ph = ta.pivothigh(high, 2, len)
     float pl = ta.pivotlow(low, 2, len)
@@ -428,6 +463,7 @@ run_scanner(len) =>
 
         // 確保已經有 X,A,B,C
         if not na(array.get(t_cache, 3))
+            // Cache order: [0]=C, [1]=B, [2]=A, [3]=X.
             float pC = array.get(p_cache, 0), int tC = array.get(t_cache, 0)
             float pB = array.get(p_cache, 1), int tB = array.get(t_cache, 1)
             float pA = array.get(p_cache, 2), int tA = array.get(t_cache, 2)
@@ -450,6 +486,7 @@ run_scanner(len) =>
                     bool tr_ok = trend_ok(is_bull, trend_len)
 
                     if swing_ok and tr_ok
+                        // Structural quality dimensions (time + alternation).
                         // 時間對稱 / 交替
                         float TAB = float(tB - tA)
                         float TBC = float(tC - tB)
@@ -531,6 +568,7 @@ run_scanner(len) =>
                             s_ratio := (score_in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(AC, 1.618*(1-tol), 2.24*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
                         // 最終分數（嚴格：比例 + 時間對稱 + 交替）
                         if pn != "None"
+                            // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
                             float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
                             if score >= min_score
                                 target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
@@ -539,6 +577,7 @@ run_scanner(len) =>
 // 4) 多尺度掃描（更密 + 覆蓋 10~500）
 // 說明：Pine 對 pivot 參數動態迴圈限制多，所以用「密集展開」達到你要的更多時間區間掃描
 // =====================================================
+// 4) Execute scanner across many lengths to approximate dynamic pivot search.
 
 // 保底：按你的 input 控制掃描範圍，但我們仍需用手動展開做主體。
 // 這裡採「10~200 每 10」+「220~500 每 20」的折衷：很密、但不至於爆炸。
