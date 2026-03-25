@@ -291,7 +291,9 @@ sl_price(pn, is_bull, pX, pC, XA, cd) =>
     if pn == "Gartley" or pn == "Cypher"
         pX
     else if pn == "5-0"
-        is_bull ? pC + ((1 - 1.272) * cd) : pC - ((1 - 1.272) * cd)
+        // 5-0 stop uses 1.272 extension of CD from C toward D-side continuation.
+        // This keeps bullish SL below entry and bearish SL above entry.
+        is_bull ? pC - (1.272 * cd) : pC + (1.272 * cd)
     else
         float xc_ratio = XA > 0 ? math.abs(pC - pX) / XA : na
         float sl_ratio = sl_ratio_for(pn, xc_ratio)
