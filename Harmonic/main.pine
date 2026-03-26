@@ -655,7 +655,12 @@ run_scanner(len) =>
                             XD_hi := 1.13*(1+tol), XD_lo := 0.886*(1-tol) // 這裡用區間而非單點
                             BD_hi := 2.24*(1+tol*2), BD_lo := 1.618*(1-tol*2)
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
-                       
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+
 						if (pn == "None" or pn =="Shark_886") and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
                             pn := "Shark_113"
                             XD_hi := 1.13*(1+tol), XD_lo := 1.13*(1-tol) // 這裡用區間而非單點
@@ -675,7 +680,7 @@ run_scanner(len) =>
                             BD_hi := 0.5*(1+tol),  BD_lo := 0.5*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
                             s_ratio := (score_in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(AC, 1.618*(1-tol), 2.24*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
                         // 最終分數（嚴格：比例 + 時間對稱 + 交替）
-                        if pn != "None"
+                        if pn != "None" and pn != "Shark_886"
                             // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
                             float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
                             if score >= min_score
