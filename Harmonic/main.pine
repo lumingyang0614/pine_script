@@ -17,10 +17,10 @@ scan_max  = input.int(500, "最大掃描回溯", minval=10, group=grp_scan)
 scan_step = input.int(5,  "掃描步進 (更密)", minval=2, group=grp_scan) // 你想「更多時間區間」→ 用更小 step
 
 grp_strict = "嚴格濾網"
-tol_pct        = input.float(8.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
-time_sym_pct   = input.float(150.0, "時間對稱容忍 (%) [嚴格建議 35~55]", minval=0.0, maxval=200.0, group=grp_strict)
+tol_pct        = input.float(5.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
+time_sym_pct   = input.float(100.0, "時間對稱容忍 (%) [嚴格建議 35~55]", minval=0.0, maxval=200.0, group=grp_strict)
 time_limit_mult = input.float(4.0, "D timeout mult (BC)", minval=0.5, group=grp_strict)
-pin_wick_ratio = input.float(1.8, "Pin bar wick/body", minval=1.0, group=grp_strict)
+pin_wick_ratio = input.float(1.5, "Pin bar wick/body", minval=1.0, group=grp_strict)
 pin_body_max   = input.float(0.35, "Pin bar max body %", minval=0.05, maxval=0.8, group=grp_strict)
 rev_max_offset = input.int(300, "Reversal max offset", minval=1, group=grp_strict)
 alt_ratio      = input.float(1.0, "交替原則強度 (斜率倍率) [嚴格建議 1.2~1.5]", minval=1.0, group=grp_strict)
@@ -29,20 +29,45 @@ trend_len      = input.int(50,     "趨勢均線長度", minval=10, group=grp_st
 min_score      = input.int(30,     "最低品質分數 (0-100) [嚴格建議 75~90]", minval=0, maxval=100, group=grp_strict)
 confirm_on_reject = input.bool(true, "Confirm on PRZ reject", group=grp_strict)
 reject_atr_len    = input.int(14, "Reject ATR length", minval=1, group=grp_strict)
-reject_atr_mult   = input.float(0.15, "Reject move (ATR)", minval=0.0, step=0.05, group=grp_strict)
+reject_atr_mult   = input.float(0.01, "Reject move (ATR)", minval=0.0, step=0.05, group=grp_strict)
 
-grp_draw = "繪圖"
-line_future = input.int(12, "PRZ 預測寬度", minval=1, group=grp_draw)
-show_prz_box = input.bool(true, "顯示 PRZ 方框(未觸發)", group=grp_draw)
-show_score   = input.bool(true, "在標籤顯示分數", group=grp_draw)
+grp_draw = "Draw"
+line_future = input.int(200, "PRZ projection width", minval=1, group=grp_draw)
+show_prz_box = input.bool(true, "Show PRZ box (predicted)", group=grp_draw)
+show_score   = input.bool(true, "Show score in pattern label", group=grp_draw)
 
 // Display toggles and color theme.
+show_no_confirm_reason = input.bool(false, "Show no-confirm reason", group=grp_draw)
 show_levels  = input.bool(true, "Show TP/SL", group=grp_draw)
-color_bull = color.new(#00ffbb, 0)
-color_bear = color.new(#ff5252, 0)
+show_predicted = input.bool(true, "Show predicted pattern/box", group=grp_draw)
+show_pred_levels = input.bool(false, "Show predicted TP/SL", group=grp_draw)
+max_active_preds = input.int(8, "Max active predictions", minval=1, maxval=100, group=grp_draw)
+max_reason_labels = input.int(40, "Max no-confirm labels", minval=1, maxval=300, group=grp_draw)
+
+grp_style = "Style"
+style_theme = input.string("Clean Aqua", "Theme", options=["Clean Aqua", "Sunset", "Mono"], group=grp_style)
+line_w_confirm = input.int(2, "Confirmed line width", minval=1, maxval=4, group=grp_style)
+line_w_pred = input.int(1, "Predicted line width", minval=1, maxval=3, group=grp_style)
+line_fade_confirm = input.int(0, "Confirmed line fade", minval=0, maxval=80, group=grp_style)
+line_fade_pred = input.int(25, "Predicted line fade", minval=0, maxval=90, group=grp_style)
+prz_fill_alpha = input.int(85, "PRZ fill alpha", minval=0, maxval=100, group=grp_style)
+label_size_opt = input.string("normal", "Pattern label size", options=["tiny", "small", "normal", "large"], group=grp_style)
+level_label_size_opt = input.string("small", "Level label size", options=["tiny", "small", "normal"], group=grp_style)
+compact_level_text = input.bool(true, "Compact TP/SL text", group=grp_style)
+
+color bull_base = style_theme == "Sunset" ? #2dd4bf : style_theme == "Mono" ? #9ad0ff : #00ffbb
+color bear_base = style_theme == "Sunset" ? #ff6b6b : style_theme == "Mono" ? #ff9aa2 : #ff5252
+color prz_base = style_theme == "Sunset" ? #ffd166 : style_theme == "Mono" ? #9ca3af : #facc15
+color level_tp_base = style_theme == "Sunset" ? #2dd4bf : style_theme == "Mono" ? #67e8f9 : #00cc66
+color level_sl_base = style_theme == "Sunset" ? #ff6b6b : style_theme == "Mono" ? #fda4af : #ff3333
+color_bull = color.new(bull_base, line_fade_confirm)
+color_bear = color.new(bear_base, line_fade_confirm)
 
 tol = tol_pct / 100.0
 time_sym = time_sym_pct / 100.0
+
+size_from_input(opt) =>
+    opt == "tiny" ? size.tiny : opt == "small" ? size.small : opt == "large" ? size.large : size.normal
 
 // 去重 key
 // Runtime caches:
@@ -59,6 +84,8 @@ var string[] pred_label_keys = array.new_string()
 var label[] pred_labels = array.new_label()
 var string[] pred_box_keys = array.new_string()
 var box[] pred_boxes = array.new_box()
+var string[] fail_reason_keys = array.new_string()
+var label[] fail_reason_labels = array.new_label()
 
 max_keys = 1200  // 防止 key 無限長（Pine 內存）
 trim_keys_if_needed() =>
@@ -154,14 +181,14 @@ reversal_ok_at(index_offset, is_bull) =>
 draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score) =>
     // Draw a confirmed XABCD pattern.
     c = is_bull ? color_bull : color_bear
-    line.new(tX, pX, tA, pA, color=c, width=1)
-    line.new(tA, pA, tB, pB, color=c, width=1)
-    line.new(tB, pB, tC, pC, color=c, width=1)
-    line.new(tC, pC, tD, pD, color=c, width=1)
-    line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed)
-    line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed)
+    line.new(tX, pX, tA, pA, color=c, width=line_w_confirm)
+    line.new(tA, pA, tB, pB, color=c, width=line_w_confirm)
+    line.new(tB, pB, tC, pC, color=c, width=line_w_confirm)
+    line.new(tC, pC, tD, pD, color=c, width=line_w_confirm)
+    line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed, width=1)
+    line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed, width=1)
     string txt = show_score ? (name + " (" + str.tostring(int(score)) + ")") : name
-    label.new(tD, pD, txt, color=color.new(c, 100), textcolor=c, style=is_bull ? label.style_label_up : label.style_label_down, size=size.large)
+    label.new(tD, pD, txt, color=color.new(c, 88), textcolor=color.new(color.white, 0), style=is_bull ? label.style_label_up : label.style_label_down, size=size_from_input(label_size_opt))
 
 
 make_key(tX, tA, tB, tC, pn, is_bull, is_trig) =>
@@ -190,6 +217,26 @@ add_pred_box(key, b) =>
     array.push(pred_box_keys, key)
     array.push(pred_boxes, b)
 
+add_fail_reason_label(key, lb) =>
+    if not array.includes(fail_reason_keys, key)
+        array.push(fail_reason_keys, key)
+        array.push(fail_reason_labels, lb)
+        if array.size(fail_reason_keys) > max_reason_labels
+            label.delete(array.shift(fail_reason_labels))
+            array.shift(fail_reason_keys)
+    else
+        label.delete(lb)
+    0
+
+remove_fail_reason_label(key) =>
+    if array.size(fail_reason_keys) > 0
+        for i = array.size(fail_reason_keys) - 1 to 0
+            if array.get(fail_reason_keys, i) == key
+                label.delete(array.get(fail_reason_labels, i))
+                array.remove(fail_reason_keys, i)
+                array.remove(fail_reason_labels, i)
+    0
+
 delete_pred_objects(key) =>
     // Remove all lines/labels/boxes associated with one prediction key.
     if array.size(pred_line_keys) > 0
@@ -213,6 +260,7 @@ delete_pred_objects(key) =>
 
 remove_pred_by_key(key) =>
     delete_pred_objects(key)
+    remove_fail_reason_label(key)
     if array.size(pred_keys) > 0
         for i = array.size(pred_keys) - 1 to 0
             if array.get(pred_keys, i) == key
@@ -220,6 +268,15 @@ remove_pred_by_key(key) =>
                 array.remove(pred_tB, i)
                 array.remove(pred_tC, i)
                 array.remove(pred_pn, i)
+
+trim_pred_patterns_if_needed() =>
+    int overflow = array.size(pred_keys) - max_active_preds
+    if overflow > 0
+        for _ = 0 to overflow - 1
+            if array.size(pred_keys) > 0
+                string old_key = array.get(pred_keys, 0)
+                remove_pred_by_key(old_key)
+    0
 
 cleanup_pred() =>
     // Purge predictions whose time symmetry failed or timeout expired.
@@ -235,41 +292,47 @@ cleanup_pred() =>
             bool time_expired = TBC > 0 and TCD > TBC * time_limit_mult
             if (not time_d_ok) or time_expired
                 delete_pred_objects(key)
+                remove_fail_reason_label(key)
                 array.remove(pred_keys, i)
                 array.remove(pred_tB, i)
                 array.remove(pred_tC, i)
                 array.remove(pred_pn, i)
 draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score, key) =>
     c = is_bull ? color_bull : color_bear
-    add_pred_line(key, line.new(tX, pX, tA, pA, color=c, width=1))
-    add_pred_line(key, line.new(tA, pA, tB, pB, color=c, width=1))
-    add_pred_line(key, line.new(tB, pB, tC, pC, color=c, width=1))
-    add_pred_line(key, line.new(tC, pC, tD, pD, color=c, width=1))
-    add_pred_line(key, line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed))
-    add_pred_line(key, line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed))
+    color pred_c = color.new(c, line_fade_pred)
+    add_pred_line(key, line.new(tX, pX, tA, pA, color=pred_c, width=line_w_pred))
+    add_pred_line(key, line.new(tA, pA, tB, pB, color=pred_c, width=line_w_pred))
+    add_pred_line(key, line.new(tB, pB, tC, pC, color=pred_c, width=line_w_pred))
+    add_pred_line(key, line.new(tC, pC, tD, pD, color=pred_c, width=line_w_pred))
+    add_pred_line(key, line.new(tX, pX, tB, pB, color=color.new(pred_c, 70), style=line.style_dashed, width=1))
+    add_pred_line(key, line.new(tA, pA, tC, pC, color=color.new(pred_c, 70), style=line.style_dashed, width=1))
     string txt = show_score ? (name + " (" + str.tostring(int(score)) + ")") : name
-    add_pred_label(key, label.new(tD, pD, txt, color=color.new(c, 100), textcolor=c, style=is_bull ? label.style_label_up : label.style_label_down, size=size.large))
+    add_pred_label(key, label.new(tD, pD, txt, color=color.new(pred_c, 90), textcolor=color.new(color.white, 0), style=is_bull ? label.style_label_up : label.style_label_down, size=size_from_input(label_size_opt)))
 
 draw_trade_levels_pred(tD, entry, tp1, tp2, sl, pn, is_bull, key) =>
-    if show_levels
-        color tp_c = color.new(#00cc66, 0)
-        color sl_c = color.new(#ff3333, 0)
+    if show_pred_levels
+        color tp_c = color.new(level_tp_base, 15)
+        color sl_c = color.new(level_sl_base, 15)
         int t1 = tD
         int t2 = tD + line_future
         float risk = math.abs(entry - sl)
         float rr1 = risk > 0 ? math.abs(tp1 - entry) / risk : na
         float rr2 = risk > 0 ? math.abs(tp2 - entry) / risk : na
         float risk_pct = entry != 0 ? (-100.0 * risk / entry) : na
-        string side = is_bull ? "Bullish " : "Bearish "
+        string side = compact_level_text ? (is_bull ? "B " : "S ") : (is_bull ? "Bullish " : "Bearish ")
         string prefix = side + pn + " "
-        add_pred_line(key, line.new(t1, entry, t2, entry, color=color.new(color.gray, 50), style=line.style_dotted))
+        string e_tag = compact_level_text ? "E: " : "Entry: "
+        string t1_tag = compact_level_text ? "T1: " : "TP1: "
+        string t2_tag = compact_level_text ? "T2: " : "TP2: "
+        string sl_tag = "SL: "
+        add_pred_line(key, line.new(t1, entry, t2, entry, color=color.new(color.gray, 70), style=line.style_dotted))
         add_pred_line(key, line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed))
         add_pred_line(key, line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed))
         add_pred_line(key, line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed))
-        add_pred_label(key, label.new(t2, entry, prefix + "Entry: " + str.tostring(entry, format.mintick), color=color.new(color.gray, 85), textcolor=color.gray, style=label.style_label_left, size=size.normal))
-        add_pred_label(key, label.new(t2, tp1, prefix + "TP1: " + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal))
-        add_pred_label(key, label.new(t2, tp2, prefix + "TP2: " + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal))
-        add_pred_label(key, label.new(t2, sl,  prefix + "SL: " + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 85), textcolor=sl_c, style=label.style_label_left, size=size.normal))
+        add_pred_label(key, label.new(t2, entry, prefix + e_tag + str.tostring(entry, format.mintick), color=color.new(color.black, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+        add_pred_label(key, label.new(t2, tp1, prefix + t1_tag + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+        add_pred_label(key, label.new(t2, tp2, prefix + t2_tag + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+        add_pred_label(key, label.new(t2, sl,  prefix + sl_tag + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
 
 sl_ratio_for(pn, xc_ratio) =>
     if pn == "Bat"
@@ -290,13 +353,17 @@ sl_ratio_for(pn, xc_ratio) =>
     else
         1.272
 
-sl_price(pn, is_bull, pX, pC, XA, cd) =>
+sl_price(pn, is_bull, pX, pC, XA, XC, cd) =>
     if pn == "Gartley" or pn == "Cypher"
         pX
     else if pn == "5-0"
         // 5-0 stop uses 1.272 extension of CD from C toward D-side continuation.
         // This keeps bullish SL below entry and bearish SL above entry.
         is_bull ? pC - (1.272 * cd) : pC + (1.272 * cd)
+    else if pn == "Shark_113" or pn == "Shark_886"
+        float xc_ratio = XA > 0 ? math.abs(pC - pX) / XA : na
+        float sl_ratio = sl_ratio_for(pn, xc_ratio)
+        is_bull ? pX + ((1 - sl_ratio) * XC) : pX - ((1 - sl_ratio) * XC)
     else
         float xc_ratio = XA > 0 ? math.abs(pC - pX) / XA : na
         float sl_ratio = sl_ratio_for(pn, xc_ratio)
@@ -306,30 +373,34 @@ sl_price(pn, is_bull, pX, pC, XA, cd) =>
 
 draw_trade_levels(tD, entry, tp1, tp2, sl, pn, is_bull) =>
     if show_levels
-        color tp_c = color.new(#00cc66, 0)
-        color sl_c = color.new(#ff3333, 0)
+        color tp_c = color.new(level_tp_base, 0)
+        color sl_c = color.new(level_sl_base, 0)
         int t1 = tD
         int t2 = tD + line_future
         float risk = math.abs(entry - sl)
         float rr1 = risk > 0 ? math.abs(tp1 - entry) / risk : na
         float rr2 = risk > 0 ? math.abs(tp2 - entry) / risk : na
         float risk_pct = entry != 0 ? (-100.0 * risk / entry) : na
-        string side = is_bull ? "Bullish " : "Bearish "
+        string side = compact_level_text ? (is_bull ? "B " : "S ") : (is_bull ? "Bullish " : "Bearish ")
         string prefix = side + pn + " "
+        string e_tag = compact_level_text ? "E: " : "Entry: "
+        string t1_tag = compact_level_text ? "T1: " : "TP1: "
+        string t2_tag = compact_level_text ? "T2: " : "TP2: "
+        string sl_tag = "SL: "
         line.new(t1, entry, t2, entry, color=color.new(color.gray, 50), style=line.style_dotted)
         line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed)
         line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed)
         line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed)
-        label.new(t2, entry, prefix + "Entry: " + str.tostring(entry, format.mintick), color=color.new(color.gray, 85), textcolor=color.gray, style=label.style_label_left, size=size.normal)
-        label.new(t2, tp1, prefix + "TP1: " + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal)
-        label.new(t2, tp2, prefix + "TP2: " + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 85), textcolor=tp_c, style=label.style_label_left, size=size.normal)
-        label.new(t2, sl,  prefix + "SL: " + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 85), textcolor=sl_c, style=label.style_label_left, size=size.normal)
+        label.new(t2, entry, prefix + e_tag + str.tostring(entry, format.mintick), color=color.new(color.black, 72), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
+        label.new(t2, tp1, prefix + t1_tag + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
+        label.new(t2, tp2, prefix + t2_tag + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
+        label.new(t2, sl,  prefix + sl_tag + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
 
 // =====================================================
 // 2) PRZ 計算 + 觸發判斷（保留你原本的 XD/BD 交集）
 // =====================================================
 // 2) PRZ logic: build overlap zone, detect touch, then route to predicted/confirmed flow.
-target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r, BD_high_r, pn, is_bull, score) =>
+target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_low_r, BD_high_r, pn, is_bull, score) =>
     // PRZ engine:
     // 1) derive XD and BD price zones
     // 2) take overlap as final PRZ
@@ -418,6 +489,23 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
             if is_trig and not na(trigger_i) and trigger_i > 0
                 reject_ok := is_bull ? (close >= low[trigger_i] + reject_move) : (close <= high[trigger_i] - reject_move)
             bool confirm_ok = is_trig ? ((rev_ok and d_is_extreme and not prz_breach) or (confirm_on_reject and reject_ok and not prz_breach)) : false
+            if show_no_confirm_reason and is_trig and not confirm_ok
+                string fail_reason = ""
+                if prz_breach
+                    fail_reason := "breach"
+                if not rev_ok
+                    fail_reason := fail_reason == "" ? "rev" : fail_reason + "|rev"
+                if not d_is_extreme
+                    fail_reason := fail_reason == "" ? "extreme" : fail_reason + "|extreme"
+                if confirm_on_reject and not reject_ok
+                    fail_reason := fail_reason == "" ? "reject" : fail_reason + "|reject"
+                if fail_reason == ""
+                    fail_reason := "pending"
+                string fail_text = pn + " no-confirm: " + fail_reason
+                label fail_lb = label.new(bar_index, (d_high + d_low) / 2.0, fail_text, color=color.new(prz_base, 82), textcolor=color.new(color.black, 0), style=label.style_label_left, size=size.tiny)
+                add_fail_reason_label(base_key, fail_lb)
+            else
+                remove_fail_reason_label(base_key)
             // allow_draw gates both predicted and confirmed outputs.
             bool allow_draw = (is_trig ? confirm_ok : (time_d_ok and not time_expired)) and not array.includes(drawn_keys, key)
 
@@ -434,15 +522,17 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_low_r, XD_high_r, BD_low_r
                 float tp_r2 = shark_tp ? 0.886 : 0.618
                 float tp1 = is_bull ? entry + tp_base * tp_r1 : entry - tp_base * tp_r1
                 float tp2 = is_bull ? entry + tp_base * tp_r2 : entry - tp_base * tp_r2
-                float sl = sl_price(pn, is_bull, pX, pC, XA, cd)
+                float sl = sl_price(pn, is_bull, pX, pC, XA, XC, cd)
 
                 if (not is_trig)
                     // Prediction path: PRZ exists but no valid D confirmation yet.
                     // Draw prediction and keep it tracked for future cleanup.
                     add_pred_pattern(base_key, tB, tC, pn)
-                    if show_prz_box
-                        add_pred_box(base_key, box.new(bar_index, d_high, bar_index + line_future, d_low, border_color=color.yellow, bgcolor=color.new(color.yellow, 85)))
-                    draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, bar_index, (d_high + d_low) / 2.0, pn, is_bull, score, base_key)
+                    trim_pred_patterns_if_needed()
+                    if show_predicted
+                        if show_prz_box
+                            add_pred_box(base_key, box.new(bar_index, d_high, bar_index + line_future, d_low, border_color=color.new(prz_base, 0), bgcolor=color.new(prz_base, prz_fill_alpha)))
+                        draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, bar_index, (d_high + d_low) / 2.0, pn, is_bull, score, base_key)
                     draw_trade_levels_pred(bar_index, entry, tp1, tp2, sl, pn, is_bull, base_key)
                 else
                     // Confirmation path: remove prediction and render final structure.
@@ -492,6 +582,7 @@ run_scanner(len) =>
                 float XA = math.abs(pA - pX)
                 float AB = math.abs(pB - pA)
                 float BC = math.abs(pC - pB)
+                float XC = math.abs(pC - pX)
 
                 // 避免除 0
                 if XA > 0 and AB > 0
@@ -588,7 +679,7 @@ run_scanner(len) =>
                             // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
                             float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
                             if score >= min_score
-                                target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                                target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
 // =====================================================
 // 4) 多尺度掃描（更密 + 覆蓋 10~500）
