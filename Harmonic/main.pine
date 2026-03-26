@@ -340,7 +340,7 @@ sl_ratio_for(pn, xc_ratio) =>
     else if pn == "Alt Bat"
         1.272
     else if pn == "Butterfly"
-        1.414
+        1.618
     else if pn == "Crab" or pn == "Deep Crab"
         2.0
     else if pn == "Shark_113" or pn == "Shark_886"
