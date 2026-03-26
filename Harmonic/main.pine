@@ -613,44 +613,74 @@ run_scanner(len) =>
                             XD_hi := 0.886*(1+tol), XD_lo := 0.886*(1-tol)
                             BD_hi := 2.618*(1+tol), BD_lo := 1.618*(1-tol)
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.5*(1+tol)) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(0.886, 0.886, tol)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Alt Bat ----
-                        if pn == "None" and near(XB, 0.382, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
+                        if near(XB, 0.382, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
                             pn := "Alt Bat"
                             XD_hi := 1.13*(1+tol), XD_lo := 1.13*(1-tol)
                             BD_hi := 3.618*(1+tol), BD_lo := 2.0*(1-tol)
                             s_ratio := (score_near(XB, 0.382, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(1.13, 1.13, tol)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Butterfly ----
-                        if pn == "None" and near(XB, 0.786, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
+                        if near(XB, 0.786, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
                             pn := "Butterfly"
                             XD_hi := 1.414*(1+tol), XD_lo := 1.27*(1-tol)
                             BD_hi := 2.24*(1+tol),  BD_lo := 1.618*(1-tol)
                             s_ratio := (score_near(XB, 0.786, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_in_range(1.33, XD_lo, XD_hi)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Crab ----
-                        if pn == "None" and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
+                        if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
                             pn := "Crab"
                             XD_hi := 1.618*(1+tol), XD_lo := 1.618*(1-tol)
                             BD_hi := 3.618*(1+tol), BD_lo := 2.618*(1-tol)
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(1.618, 1.618, tol)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Deep Crab ----
-                        if pn == "None" and near(XB, 0.886, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
+                        if near(XB, 0.886, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
                             pn := "Deep Crab"
                             XD_hi := 1.618*(1+tol), XD_lo := 1.618*(1-tol)
                             BD_hi := 3.618*(1+tol), BD_lo := 2.0*(1-tol)
                             s_ratio := (score_near(XB, 0.886, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(1.618, 1.618, tol)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Gartley ----
-                        if pn == "None" and near(XB, 0.618, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
+                        if in_range(XB, 0.618*(1-tol), 0.618*(1+tol)) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
                             pn := "Gartley"
                             XD_hi := 0.786*(1+tol), XD_lo := 0.786*(1-tol)
                             BD_hi := 1.618*(1+tol), BD_lo := 1.13*(1-tol)
                             s_ratio := (score_near(XB, 0.618, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Shark (可選) ----
-                        if pn == "None" and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
+                        if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
                             pn := "Shark_886"
                             XD_hi := 1.13*(1+tol), XD_lo := 0.886*(1-tol) // 這裡用區間而非單點
                             BD_hi := 2.24*(1+tol), BD_lo := 1.618*(1-tol)
@@ -661,30 +691,39 @@ run_scanner(len) =>
                                 if score >= min_score
                                     target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-						if (pn == "None" or pn =="Shark_886") and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
+						if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
                             pn := "Shark_113"
                             XD_hi := 1.13*(1+tol), XD_lo := 1.13*(1-tol) // 這裡用區間而非單點
                             BD_hi := 2.24*(1+tol), BD_lo := 1.618*(1-tol)
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
                         // ---- Cypher ----
-                        if pn == "None" and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.414*(1+tol))
+                        if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.414*(1+tol))
                             pn := "Cypher"
                             XD_hi := 0.786*(1+tol), XD_lo := 0.786*(1-tol)
                             BD_hi := 2.0*(1+tol),  BD_lo := 1.272*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.414*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
-                        
-                        if pn == "None" and in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) and in_range(AC, 1.618*(1-tol), 2.24*(1+tol))
+                            if pn != "None"
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+
+                        if in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) and in_range(AC, 1.618*(1-tol), 2.24*(1+tol))
                             pn := "5-0"
                             XD_hi := 3*(1+tol), XD_lo := 0*(1-tol)
                             BD_hi := 0.5*(1+tol),  BD_lo := 0.5*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
                             s_ratio := (score_in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(AC, 1.618*(1-tol), 2.24*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
-                        // 最終分數（嚴格：比例 + 時間對稱 + 交替）
-                        if pn != "None" and pn != "Shark_886"
-                            // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                            float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                            if score >= min_score
-                                target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if pn != "None" 
+                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
+                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                if score >= min_score
+                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
 // =====================================================
 // 4) 多尺度掃描（更密 + 覆蓋 10~500）
