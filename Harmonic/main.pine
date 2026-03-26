@@ -650,16 +650,16 @@ run_scanner(len) =>
                             s_ratio := (score_near(XB, 0.618, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
 
                         // ---- Shark (可選) ----
-                        // if pn == "None" and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
-                        //     pn := "Shark_886"
-                        //     XD_hi := 1.13*(1+tol), XD_lo := 0.886*(1-tol) // 這裡用區間而非單點
-                        //     BD_hi := 2.24*(1+tol), BD_lo := 1.618*(1-tol)
-                        //     s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
+                        if pn == "None" and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
+                            pn := "Shark_886"
+                            XD_hi := 1.13*(1+tol), XD_lo := 0.886*(1-tol) // 這裡用區間而非單點
+                            BD_hi := 2.24*(1+tol*2), BD_lo := 1.618*(1-tol*2)
+                            s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
                        
 						if (pn == "None" or pn =="Shark_886") and in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
                             pn := "Shark_113"
                             XD_hi := 1.13*(1+tol), XD_lo := 1.13*(1-tol) // 這裡用區間而非單點
-                            BD_hi := 2.24*(1+tol), BD_lo := 1.618*(1-tol)
+                            BD_hi := 2.24*(1+tol*2), BD_lo := 1.618*(1-tol*2)
                             s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
 
                         // ---- Cypher ----
