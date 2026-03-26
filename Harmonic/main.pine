@@ -344,9 +344,9 @@ sl_ratio_for(pn, xc_ratio) =>
     else if pn == "Crab" or pn == "Deep Crab"
         2.0
     else if pn == "Shark_113" or pn == "Shark_886"
-        if near(xc_ratio, 0.886, tol)
+        if pn == "Shark_886"
             1.0
-        else if near(xc_ratio, 1.13, tol)
+        else if pn == "Shark_113"
             1.272
         else
             1.272
