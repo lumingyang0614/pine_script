@@ -1,20 +1,10 @@
-//@version=5
+﻿//@version=5
 indicator("Harmonic Pro+ (Strict) - Multi-Scale Auto Scanner", overlay=true, max_labels_count=500, max_lines_count=500, max_boxes_count=500)
-// Pipeline summary:
-// 1) Scan pivots across multiple right-bar lengths.
-// 2) Validate XA/AB/BC structure and identify harmonic family.
-// 3) Build PRZ from XD/BD overlap, then gate by timing/reversal quality.
-// 4) Draw predicted or confirmed pattern and trade levels.
-// 5) Use keys to deduplicate and clean old prediction objects.
 
-// =====================================================
-// 0) 設定：嚴格版（加入 時間對稱/交替原則/趨勢濾網/品質分數）
-// =====================================================
-// 0) Inputs: scan range, strict filters, and drawing options.
 grp_scan = "掃描設定"
-scan_min  = input.int(10,  "最小掃描回溯", minval=5,  group=grp_scan)
-scan_max  = input.int(500, "最大掃描回溯", minval=10, group=grp_scan)
-scan_step = input.int(5,  "掃描步進 (更密)", minval=2, group=grp_scan) // 你想「更多時間區間」→ 用更小 step
+scan_min  = input.int(1,  "Min scan lookback", minval=1, maxval=50, group=grp_scan)
+scan_max  = input.int(50, "Max scan lookback", minval=10, maxval=50, group=grp_scan)
+scan_step = input.int(2,  "掃描步進 (更密)", minval=1, group=grp_scan) // 你想「更多時間區間」→ 用更小 step
 
 grp_strict = "嚴格濾網"
 tol_pct        = input.float(5.0,  "比例容錯 (%) [嚴格建議 4~7]", minval=0.0, group=grp_strict)
@@ -27,25 +17,56 @@ alt_ratio      = input.float(1.0, "交替原則強度 (斜率倍率) [嚴格建�
 use_trend      = input.bool(false,  "啟用趨勢濾網 (建議開)", group=grp_strict)
 trend_len      = input.int(50,     "趨勢均線長度", minval=10, group=grp_strict)
 min_score      = input.int(30,     "最低品質分數 (0-100) [嚴格建議 75~90]", minval=0, maxval=100, group=grp_strict)
+compat_mode    = input.bool(true, "相容模式（接近常見諧波腳本）", group=grp_strict)
+strict_tol_pct = input.float(3.0, "Strict tolerance (%)", minval=0.0, maxval=20.0, group=grp_strict)
+min_profit_pct = input.float(1.0, "Min profit % (TP1)", minval=0.0, step=0.1, group=grp_strict)
 confirm_on_reject = input.bool(true, "Confirm on PRZ reject", group=grp_strict)
 reject_atr_len    = input.int(14, "Reject ATR length", minval=1, group=grp_strict)
 reject_atr_mult   = input.float(0.01, "Reject move (ATR)", minval=0.0, step=0.05, group=grp_strict)
+
+grp_patterns = "Pattern Filter"
+use_gartley = input.bool(true, "Use Gartley", group=grp_patterns)
+use_deep_gartley = input.bool(true, "Use Deep Gartley", group=grp_patterns)
+use_bat = input.bool(true, "Use Bat", group=grp_patterns)
+use_alt_bat = input.bool(true, "Use Alt Bat", group=grp_patterns)
+use_butterfly = input.bool(true, "Use Butterfly", group=grp_patterns)
+use_crab = input.bool(true, "Use Crab", group=grp_patterns)
+use_deep_crab = input.bool(true, "Use Deep Crab", group=grp_patterns)
+use_shark_886 = input.bool(true, "Use Shark 886", group=grp_patterns)
+use_shark_113 = input.bool(true, "Use Shark 113", group=grp_patterns)
+use_cypher = input.bool(true, "Use Cypher", group=grp_patterns)
+use_50 = input.bool(true, "Use 5-0", group=grp_patterns)
 
 grp_draw = "Draw"
 line_future = input.int(200, "PRZ projection width", minval=1, group=grp_draw)
 show_prz_box = input.bool(true, "Show PRZ box (predicted)", group=grp_draw)
 show_score   = input.bool(true, "Show score in pattern label", group=grp_draw)
 
-// Display toggles and color theme.
 show_no_confirm_reason = input.bool(false, "Show no-confirm reason", group=grp_draw)
 show_levels  = input.bool(true, "Show TP/SL", group=grp_draw)
+show_prob_in_levels = input.bool(true, "Show TP/SL probability", group=grp_draw)
+show_stats_table = input.bool(true, "Show stats table", group=grp_draw)
+show_hit_marks = input.bool(true, "Show TP/SL hit marks", group=grp_draw)
+show_start_mark = input.bool(true, "Show start mark (entry touched)", group=grp_draw)
+show_pierce_mark = input.bool(true, "Show pierce mark", group=grp_draw)
 show_predicted = input.bool(true, "Show predicted pattern/box", group=grp_draw)
 show_pred_levels = input.bool(false, "Show predicted TP/SL", group=grp_draw)
-max_active_preds = input.int(8, "Max active predictions", minval=1, maxval=100, group=grp_draw)
+keep_confirmed_prz_box = input.bool(true, "Keep PRZ box after entry", group=grp_draw)
+auto_prz_box_len = input.bool(true, "Auto PRZ box length by time symmetry", group=grp_draw)
+prz_box_len_factor = input.float(1.0, "PRZ box time scale", minval=0.1, step=0.1, group=grp_draw)
+prz_box_len_min = input.int(20, "PRZ box min bars", minval=1, group=grp_draw)
+prz_box_len_max = input.int(400, "PRZ box max bars", minval=5, group=grp_draw)
+show_prz_ratio_numbers = input.bool(true, "Show XABC ratio numbers", group=grp_draw)
+max_active_preds = input.int(5, "Max active predictions", minval=1, maxval=100, group=grp_draw)
 max_reason_labels = input.int(40, "Max no-confirm labels", minval=1, maxval=300, group=grp_draw)
+dedup_enabled = input.bool(true, "Merge near confirmed patterns", group=grp_draw)
+dedup_d_bars = input.int(8, "Dedup D tolerance bars (N)", minval=0, group=grp_draw)
+dedup_entry_pct = input.float(0.25, "Dedup entry tolerance % (M)", minval=0.0, step=0.05, group=grp_draw)
 
 grp_style = "Style"
 style_theme = input.string("Clean Aqua", "Theme", options=["Clean Aqua", "Sunset", "Mono"], group=grp_style)
+use_pattern_palette = input.bool(true, "Pattern-specific colors", group=grp_style)
+show_status_tag = input.bool(true, "Show status tag", group=grp_style)
 line_w_confirm = input.int(2, "Confirmed line width", minval=1, maxval=4, group=grp_style)
 line_w_pred = input.int(1, "Predicted line width", minval=1, maxval=3, group=grp_style)
 line_fade_confirm = input.int(0, "Confirmed line fade", minval=0, maxval=80, group=grp_style)
@@ -64,15 +85,296 @@ color_bull = color.new(bull_base, line_fade_confirm)
 color_bear = color.new(bear_base, line_fade_confirm)
 
 tol = tol_pct / 100.0
+strict_tol = strict_tol_pct / 100.0
 time_sym = time_sym_pct / 100.0
+reject_atr = ta.atr(reject_atr_len)
+trend_ma = ta.sma(close, trend_len)
+
+var string[] trade_keys = array.new_string()
+var string[] trade_pn = array.new_string()
+var bool[] trade_is_bull = array.new_bool()
+var int[] trade_tD = array.new_int()
+var float[] trade_entry = array.new_float()
+var float[] trade_tp1 = array.new_float()
+var float[] trade_tp2 = array.new_float()
+var float[] trade_sl = array.new_float()
+var bool[] trade_started = array.new_bool()
+var bool[] trade_tp1_hit = array.new_bool()
+var bool[] trade_tp2_hit = array.new_bool()
+var bool[] trade_sl_hit = array.new_bool()
+
+var string[] stat_patterns = array.from("Gartley", "Deep Gartley", "Bat", "Alt Bat", "Butterfly", "Crab", "Deep Crab", "Shark", "Cypher", "5-0")
+var int[] stat_total = array.new_int(10, 0)
+var int[] stat_tp1 = array.new_int(10, 0)
+var int[] stat_tp2 = array.new_int(10, 0)
+var int[] stat_sl = array.new_int(10, 0)
+var table stats_tbl = table.new(position.bottom_right, 5, 11, frame_color=color.new(color.white, 70), border_width=1, bgcolor=color.new(color.black, 85))
 
 size_from_input(opt) =>
     opt == "tiny" ? size.tiny : opt == "small" ? size.small : opt == "large" ? size.large : size.normal
 
-// 去重 key
-// Runtime caches:
-// - drawn_keys: dedupe of already rendered structures.
-// - pred_*: bookkeeping for predicted lines/labels/boxes to allow cleanup.
+pattern_color_base(pn, is_bull) =>
+    if pn == "Gartley"
+        is_bull ? #4ade80 : #22c55e
+    else if pn == "Deep Gartley"
+        is_bull ? #16a34a : #15803d
+    else if pn == "Bat"
+        is_bull ? #38bdf8 : #0ea5e9
+    else if pn == "Alt Bat"
+        is_bull ? #2563eb : #1d4ed8
+    else if pn == "Butterfly"
+        is_bull ? #f59e0b : #d97706
+    else if pn == "Crab"
+        is_bull ? #a855f7 : #9333ea
+    else if pn == "Deep Crab"
+        is_bull ? #ef4444 : #dc2626
+    else if pn == "Shark_113" or pn == "Shark_886"
+        is_bull ? #06b6d4 : #0891b2
+    else if pn == "Cypher"
+        is_bull ? #ec4899 : #db2777
+    else if pn == "5-0"
+        is_bull ? #f43f5e : #e11d48
+    else
+        is_bull ? bull_base : bear_base
+
+pattern_color(pn, is_bull, alpha) =>
+    color base = use_pattern_palette ? pattern_color_base(pn, is_bull) : (is_bull ? bull_base : bear_base)
+    color.new(base, alpha)
+
+pattern_side_text(is_bull) =>
+    is_bull ? "Bullish" : "Bearish"
+
+pattern_status_text(is_predicted) =>
+    is_predicted ? "PRED" : "CONF"
+
+pattern_label_text(pn, is_bull, score, is_predicted) =>
+    string core = "[" + pattern_side_text(is_bull) + " " + pn + "]"
+    string st = show_status_tag ? (" [" + pattern_status_text(is_predicted) + "]") : ""
+    show_score ? (core + st + " (" + str.tostring(int(score)) + ")") : (core + st)
+
+pattern_prefix_text(pn, is_bull) =>
+    compact_level_text ? ("[" + (is_bull ? "B" : "S") + " " + pn + "] ") : ("[" + pattern_side_text(is_bull) + " " + pn + "] ")
+
+pattern_stat_idx(pn) =>
+    string bucket = (pn == "Shark_113" or pn == "Shark_886") ? "Shark" : pn
+    if bucket == "Gartley"
+        0
+    else if bucket == "Deep Gartley"
+        1
+    else if bucket == "Bat"
+        2
+    else if bucket == "Alt Bat"
+        3
+    else if bucket == "Butterfly"
+        4
+    else if bucket == "Crab"
+        5
+    else if bucket == "Deep Crab"
+        6
+    else if bucket == "Shark"
+        7
+    else if bucket == "Cypher"
+        8
+    else if bucket == "5-0"
+        9
+    else
+        -1
+
+stat_inc(arr, idx) =>
+    if idx >= 0
+        array.set(arr, idx, array.get(arr, idx) + 1)
+    0
+
+stat_dec(arr, idx) =>
+    if idx >= 0
+        int curr = array.get(arr, idx)
+        array.set(arr, idx, math.max(0, curr - 1))
+    0
+
+register_pattern_total(pn) =>
+    int idx = pattern_stat_idx(pn)
+    stat_inc(stat_total, idx)
+    0
+
+unregister_pattern_total(pn) =>
+    int idx = pattern_stat_idx(pn)
+    stat_dec(stat_total, idx)
+    0
+
+register_pattern_tp1(pn) =>
+    int idx = pattern_stat_idx(pn)
+    stat_inc(stat_tp1, idx)
+    0
+
+register_pattern_tp2(pn) =>
+    int idx = pattern_stat_idx(pn)
+    stat_inc(stat_tp2, idx)
+    0
+
+register_pattern_sl(pn) =>
+    int idx = pattern_stat_idx(pn)
+    stat_inc(stat_sl, idx)
+    0
+
+pattern_prob(pn, hit_type) =>
+    int idx = pattern_stat_idx(pn)
+    if idx < 0
+        na
+    else
+        int total = array.get(stat_total, idx)
+        int tp1h = array.get(stat_tp1, idx)
+        int tp2h = array.get(stat_tp2, idx)
+        int slh = array.get(stat_sl, idx)
+        int resolved = tp1h + slh
+        if hit_type == 1
+            resolved > 0 ? (100.0 * float(tp1h) / float(resolved)) : na
+        else if hit_type == 2
+            total > 0 ? (100.0 * float(tp2h) / float(total)) : na
+        else
+            resolved > 0 ? (100.0 * float(slh) / float(resolved)) : na
+
+render_stats_table() =>
+    if show_stats_table
+        table.cell(stats_tbl, 0, 0, "Pattern", text_color=color.white)
+        table.cell(stats_tbl, 1, 0, "Total", text_color=color.white)
+        table.cell(stats_tbl, 2, 0, "TP1 %", text_color=color.white)
+        table.cell(stats_tbl, 3, 0, "TP2 %", text_color=color.white)
+        table.cell(stats_tbl, 4, 0, "SL %", text_color=color.white)
+        for i = 0 to array.size(stat_patterns) - 1
+            string pn = array.get(stat_patterns, i)
+            int total = array.get(stat_total, i)
+            int tp1h = array.get(stat_tp1, i)
+            int tp2h = array.get(stat_tp2, i)
+            int slh = array.get(stat_sl, i)
+            int resolved = tp1h + slh
+            float p1 = resolved > 0 ? (100.0 * float(tp1h) / float(resolved)) : na
+            float p2 = total > 0 ? (100.0 * float(tp2h) / float(total)) : na
+            float ps = resolved > 0 ? (100.0 * float(slh) / float(resolved)) : na
+            string color_key = pn == "Shark" ? "Shark_113" : pn
+            color pn_color = use_pattern_palette ? pattern_color_base(color_key, true) : color.new(color.white, 0)
+            table.cell(stats_tbl, 0, i + 1, pn, text_color=pn_color)
+            table.cell(stats_tbl, 1, i + 1, str.tostring(total), text_color=color.white)
+            table.cell(stats_tbl, 2, i + 1, na(p1) ? "NA" : (str.tostring(p1, "#.0") + "%"), text_color=color.new(color.lime, 0))
+            table.cell(stats_tbl, 3, i + 1, na(p2) ? "NA" : (str.tostring(p2, "#.0") + "%"), text_color=color.new(color.aqua, 0))
+            table.cell(stats_tbl, 4, i + 1, na(ps) ? "NA" : (str.tostring(ps, "#.0") + "%"), text_color=color.new(color.red, 0))
+    else
+        if not na(stats_tbl)
+            table.clear(stats_tbl, 0, 0, 4, 10)
+    0
+
+trade_event_text(pn, is_bull, msg) =>
+    "[" + pattern_side_text(is_bull) + " " + pn + "] " + msg
+
+add_trade_tracker(key, pn, is_bull, tD, entry, tp1, tp2, sl) =>
+    if not array.includes(trade_keys, key)
+        register_pattern_total(pn)
+        array.push(trade_keys, key)
+        array.push(trade_pn, pn)
+        array.push(trade_is_bull, is_bull)
+        array.push(trade_tD, tD)
+        array.push(trade_entry, entry)
+        array.push(trade_tp1, tp1)
+        array.push(trade_tp2, tp2)
+        array.push(trade_sl, sl)
+        array.push(trade_started, false)
+        array.push(trade_tp1_hit, false)
+        array.push(trade_tp2_hit, false)
+        array.push(trade_sl_hit, false)
+    0
+
+remove_trade_tracker_at(i) =>
+    array.remove(trade_keys, i)
+    array.remove(trade_pn, i)
+    array.remove(trade_is_bull, i)
+    array.remove(trade_tD, i)
+    array.remove(trade_entry, i)
+    array.remove(trade_tp1, i)
+    array.remove(trade_tp2, i)
+    array.remove(trade_sl, i)
+    array.remove(trade_started, i)
+    array.remove(trade_tp1_hit, i)
+    array.remove(trade_tp2_hit, i)
+    array.remove(trade_sl_hit, i)
+    0
+
+remove_trade_tracker_by_key(key, rollback_total) =>
+    if array.size(trade_keys) > 0
+        for i = array.size(trade_keys) - 1 to 0
+            if array.get(trade_keys, i) == key
+                if rollback_total
+                    unregister_pattern_total(array.get(trade_pn, i))
+                remove_trade_tracker_at(i)
+    0
+
+process_trade_trackers() =>
+    if array.size(trade_keys) > 0
+        for i = array.size(trade_keys) - 1 to 0
+            string pn = array.get(trade_pn, i)
+            bool is_bull = array.get(trade_is_bull, i)
+            int tD = array.get(trade_tD, i)
+            float entry = array.get(trade_entry, i)
+            float tp1 = array.get(trade_tp1, i)
+            float tp2 = array.get(trade_tp2, i)
+            float sl = array.get(trade_sl, i)
+            bool started = array.get(trade_started, i)
+            bool tp1_done = array.get(trade_tp1_hit, i)
+            bool tp2_done = array.get(trade_tp2_hit, i)
+            bool sl_done = array.get(trade_sl_hit, i)
+
+            if bar_index >= tD
+                bool cross_entry = high >= entry and low <= entry
+                bool hit_tp1 = is_bull ? high >= tp1 : low <= tp1
+                bool hit_tp2 = is_bull ? high >= tp2 : low <= tp2
+                bool hit_sl = is_bull ? low <= sl : high >= sl
+                bool pierced = hit_sl and (hit_tp1 or hit_tp2)
+
+                if show_start_mark and (not started) and cross_entry
+                    label.new(bar_index, entry, trade_event_text(pn, is_bull, "START"), color=color.new(color.gray, 70), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size.tiny)
+                    started := true
+                    array.set(trade_started, i, true)
+
+                // Only count outcomes after entry is activated.
+                if started
+                    if (not sl_done) and (not tp2_done) and pierced
+                        if show_pierce_mark and show_hit_marks
+                            label.new(bar_index, entry, trade_event_text(pn, is_bull, "PIERCE"), color=color.new(color.orange, 25), textcolor=color.new(color.black, 0), style=label.style_label_left, size=size.tiny)
+                        // PIERCE is treated as not valid for statistics.
+                        remove_trade_tracker_at(i)
+                    else
+                        if (not tp1_done) and hit_tp1
+                            if show_hit_marks
+                                label.new(bar_index, tp1, trade_event_text(pn, is_bull, "TP1 HIT"), color=color.new(color.lime, 25), textcolor=color.new(color.black, 0), style=label.style_label_left, size=size.tiny)
+                            register_pattern_tp1(pn)
+                            tp1_done := true
+                            array.set(trade_tp1_hit, i, true)
+
+                        if (not tp2_done) and hit_tp2
+                            if not tp1_done
+                                if show_hit_marks
+                                    label.new(bar_index, tp1, trade_event_text(pn, is_bull, "TP1 HIT"), color=color.new(color.lime, 25), textcolor=color.new(color.black, 0), style=label.style_label_left, size=size.tiny)
+                                register_pattern_tp1(pn)
+                                tp1_done := true
+                                array.set(trade_tp1_hit, i, true)
+                            if show_hit_marks
+                                label.new(bar_index, tp2, trade_event_text(pn, is_bull, "TP2 HIT"), color=color.new(color.lime, 10), textcolor=color.new(color.black, 0), style=label.style_label_left, size=size.tiny)
+                            register_pattern_tp2(pn)
+                            tp2_done := true
+                            array.set(trade_tp2_hit, i, true)
+
+                        if (not sl_done) and (not tp2_done) and hit_sl
+                            if tp1_done
+                                // TP1 reached => do not count SL anymore.
+                                remove_trade_tracker_at(i)
+                            else
+                                if show_hit_marks
+                                    label.new(bar_index, sl, trade_event_text(pn, is_bull, "SL HIT"), color=color.new(color.red, 20), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size.tiny)
+                                register_pattern_sl(pn)
+                                sl_done := true
+                                array.set(trade_sl_hit, i, true)
+
+                        if tp2_done or sl_done
+                            remove_trade_tracker_at(i)
+    0
 var string[] drawn_keys = array.new_string()
 var string[] pred_keys = array.new_string()
 var int[] pred_tB = array.new_int()
@@ -86,37 +388,67 @@ var string[] pred_box_keys = array.new_string()
 var box[] pred_boxes = array.new_box()
 var string[] fail_reason_keys = array.new_string()
 var label[] fail_reason_labels = array.new_label()
+var string[] conf_line_keys = array.new_string()
+var line[] conf_lines = array.new_line()
+var string[] conf_label_keys = array.new_string()
+var label[] conf_labels = array.new_label()
+var string[] conf_box_keys = array.new_string()
+var box[] conf_boxes = array.new_box()
+var string[] kept_keys = array.new_string()
+var string[] kept_base_keys = array.new_string()
+var string[] kept_groups = array.new_string()
+var int[] kept_tD = array.new_int()
+var float[] kept_entry = array.new_float()
+var float[] kept_score = array.new_float()
 
 max_keys = 1200  // 防止 key 無限長（Pine 內存）
 trim_keys_if_needed() =>
-    // Keep array size bounded to avoid memory growth on long histories.
     if array.size(drawn_keys) > max_keys
-        // 移除前面舊的 20%
         int cut = int(max_keys * 0.2)
         for _ = 0 to cut - 1
             array.shift(drawn_keys)
 
-// =====================================================
-// 1) 工具函數
-// =====================================================
-// 1) Utility helpers: range checks, scoring, reversal checks, and drawing helpers.
 in_range(v, lo, hi) =>
     v >= lo and v <= hi
 
 near(v, target, tolerance) =>
     v >= target * (1 - tolerance) and v <= target * (1 + tolerance)
 
-// 將 ratio 偏離程度轉為分數（越接近越高）
+dedup_group_key(pn, is_bull) =>
+    pn + "_" + (is_bull ? "B" : "S")
+
+entry_close_pct(a, b, pct_limit) =>
+    float base = math.max(math.abs(b), syminfo.mintick)
+    (math.abs(a - b) / base) * 100.0 <= pct_limit
+
+remove_drawn_key(key) =>
+    if array.size(drawn_keys) > 0
+        for i = array.size(drawn_keys) - 1 to 0
+            if array.get(drawn_keys, i) == key
+                array.remove(drawn_keys, i)
+    0
+
+trade_tracker_exists(key) =>
+    array.includes(trade_keys, key)
+
+trade_tracker_is_fresh(key) =>
+    bool fresh = false
+    if array.size(trade_keys) > 0
+        for i = array.size(trade_keys) - 1 to 0
+            if array.get(trade_keys, i) == key
+                bool started = array.get(trade_started, i)
+                bool tp1_done = array.get(trade_tp1_hit, i)
+                bool tp2_done = array.get(trade_tp2_hit, i)
+                bool sl_done = array.get(trade_sl_hit, i)
+                fresh := (not started) and (not tp1_done) and (not tp2_done) and (not sl_done)
+                break
+    fresh
+
 score_near(v, target, tolerance) =>
-    // Return 100 at exact target, linearly decays to 0 at tolerance bound.
-    // tolerance: 允許偏離比例，例如 0.06
     float err = math.abs(v - target) / target
-    // 只要超過容忍 → 0 分；在容忍內 → 線性 100~0
     err <= tolerance ? (100.0 * (1.0 - err / tolerance)) : 0.0
 
 score_in_range(v, lo, hi) =>
-    // Score by proximity to midpoint in [lo, hi]; outside range => 0.
-    // 在 range 內：距離中心越近分越高；range 外 0
     if v < lo or v > hi
         0.0
     else
@@ -125,28 +457,30 @@ score_in_range(v, lo, hi) =>
         float err = half > 0 ? math.abs(v - mid) / half : 0.0
         100.0 * (1.0 - math.min(err, 1.0))
 
-// 時間對稱：AB 與 BC 的「時間長度」不要差太誇張
 score_time_sym(TAB, TBC, tolerance_sym) =>
-    // Compare AB and BC durations by relative difference.
-    // tolerance_sym: 允許 AB vs BC 的相對差異，例如 0.45
     float denom = math.max(1.0, (TAB + TBC) / 2.0)
     float rel = math.abs(TAB - TBC) / denom
     rel <= tolerance_sym ? (100.0 * (1.0 - rel / tolerance_sym)) : 0.0
 
-// 交替原則：AB 與 BC 斜率至少一邊要明顯更陡（或更緩）
 score_alternation(AB, BC, TAB, TBC, ratio_mult) =>
-    // Alternation rule: AB and BC should have meaningful slope contrast.
     float s1 = AB / math.max(1.0, TAB)
     float s2 = BC / math.max(1.0, TBC)
     bool ok = (s1 >= s2 * ratio_mult) or (s2 >= s1 * ratio_mult)
     ok ? 100.0 : 0.0
 
-trend_ok(is_bull, len) =>
+trend_ok(is_bull, ma) =>
     if not use_trend
         true
     else
-        float ma = ta.sma(close, len)
         is_bull ? close < ma : close > ma
+
+prz_mode_for(pn) =>
+    if pn == "Gartley" or pn == "Deep Gartley" or pn == "Bat" or pn == "Alt Bat" or pn == "5-0"
+        1
+    else if pn == "Cypher" or pn == "Shark_113" or pn == "Shark_886"
+        2
+    else
+        3
 
 is_bull_engulfing(o, h, l, c, op, hp, lp, cp) =>
     c > o and cp < op and o <= cp and c >= op
@@ -167,7 +501,6 @@ is_bear_pin(o, h, l, c) =>
     body / bar_range <= pin_body_max and upper_w >= body * pin_wick_ratio
 
 reversal_ok_at(index_offset, is_bull) =>
-    // Reversal validator near D: engulfing / pin bar / close-break.
     if index_offset < 1 or index_offset + 1 > rev_max_offset
         false
     else
@@ -178,17 +511,28 @@ reversal_ok_at(index_offset, is_bull) =>
         bool close_break = is_bull ? c > hp : c < lp
         engulf or pin or close_break
 
-draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score) =>
-    // Draw a confirmed XABCD pattern.
-    c = is_bull ? color_bull : color_bear
-    line.new(tX, pX, tA, pA, color=c, width=line_w_confirm)
-    line.new(tA, pA, tB, pB, color=c, width=line_w_confirm)
-    line.new(tB, pB, tC, pC, color=c, width=line_w_confirm)
-    line.new(tC, pC, tD, pD, color=c, width=line_w_confirm)
-    line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed, width=1)
-    line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed, width=1)
-    string txt = show_score ? (name + " (" + str.tostring(int(score)) + ")") : name
-    label.new(tD, pD, txt, color=color.new(c, 88), textcolor=color.new(color.white, 0), style=is_bull ? label.style_label_up : label.style_label_down, size=size_from_input(label_size_opt))
+add_conf_line(key, l) =>
+    array.push(conf_line_keys, key)
+    array.push(conf_lines, l)
+
+add_conf_label(key, lb) =>
+    array.push(conf_label_keys, key)
+    array.push(conf_labels, lb)
+
+add_conf_box(key, b) =>
+    array.push(conf_box_keys, key)
+    array.push(conf_boxes, b)
+
+draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score, key) =>
+    c = pattern_color(name, is_bull, line_fade_confirm)
+    add_conf_line(key, line.new(tX, pX, tA, pA, color=c, width=line_w_confirm))
+    add_conf_line(key, line.new(tA, pA, tB, pB, color=c, width=line_w_confirm))
+    add_conf_line(key, line.new(tB, pB, tC, pC, color=c, width=line_w_confirm))
+    add_conf_line(key, line.new(tC, pC, tD, pD, color=c, width=line_w_confirm))
+    add_conf_line(key, line.new(tX, pX, tB, pB, color=color.new(c, 70), style=line.style_dashed, width=1))
+    add_conf_line(key, line.new(tA, pA, tC, pC, color=color.new(c, 70), style=line.style_dashed, width=1))
+    string txt = pattern_label_text(name, is_bull, score, false)
+    add_conf_label(key, label.new(tD, pD, txt, color=color.new(c, 88), textcolor=color.new(color.white, 0), style=is_bull ? label.style_label_up : label.style_label_down, size=size_from_input(label_size_opt)))
 
 
 make_key(tX, tA, tB, tC, pn, is_bull, is_trig) =>
@@ -197,8 +541,63 @@ make_key(tX, tA, tB, tC, pn, is_bull, is_trig) =>
 make_base_key(tX, tA, tB, tC, pn, is_bull) =>
     str.tostring(tX)+"_"+str.tostring(tA)+"_"+str.tostring(tB)+"_"+str.tostring(tC)+"_"+pn+"_"+(is_bull?"B":"S")
 
+delete_conf_objects(key) =>
+    if array.size(conf_line_keys) > 0
+        for i = array.size(conf_line_keys) - 1 to 0
+            if array.get(conf_line_keys, i) == key
+                line.delete(array.get(conf_lines, i))
+                array.remove(conf_line_keys, i)
+                array.remove(conf_lines, i)
+    if array.size(conf_label_keys) > 0
+        for i = array.size(conf_label_keys) - 1 to 0
+            if array.get(conf_label_keys, i) == key
+                label.delete(array.get(conf_labels, i))
+                array.remove(conf_label_keys, i)
+                array.remove(conf_labels, i)
+    if array.size(conf_box_keys) > 0
+        for i = array.size(conf_box_keys) - 1 to 0
+            if array.get(conf_box_keys, i) == key
+                box.delete(array.get(conf_boxes, i))
+                array.remove(conf_box_keys, i)
+                array.remove(conf_boxes, i)
+    0
+
+add_kept_record(key, base_key, group, tD, entry, score) =>
+    array.push(kept_keys, key)
+    array.push(kept_base_keys, base_key)
+    array.push(kept_groups, group)
+    array.push(kept_tD, tD)
+    array.push(kept_entry, entry)
+    array.push(kept_score, score)
+    0
+
+remove_kept_record_at(i, rollback_total) =>
+    string old_key = array.get(kept_keys, i)
+    string old_base_key = array.get(kept_base_keys, i)
+    delete_conf_objects(old_key)
+    remove_trade_tracker_by_key(old_base_key, rollback_total)
+    remove_drawn_key(old_key)
+    array.remove(kept_keys, i)
+    array.remove(kept_base_keys, i)
+    array.remove(kept_groups, i)
+    array.remove(kept_tD, i)
+    array.remove(kept_entry, i)
+    array.remove(kept_score, i)
+    0
+
+prune_inactive_kept_records() =>
+    if array.size(kept_keys) > 0
+        for i = array.size(kept_keys) - 1 to 0
+            if not trade_tracker_exists(array.get(kept_base_keys, i))
+                array.remove(kept_keys, i)
+                array.remove(kept_base_keys, i)
+                array.remove(kept_groups, i)
+                array.remove(kept_tD, i)
+                array.remove(kept_entry, i)
+                array.remove(kept_score, i)
+    0
+
 add_pred_pattern(key, tB, tC, pn) =>
-    // Keep only one predicted record per logical pattern key.
     if not array.includes(pred_keys, key)
         array.push(pred_keys, key)
         array.push(pred_tB, tB)
@@ -238,7 +637,6 @@ remove_fail_reason_label(key) =>
     0
 
 delete_pred_objects(key) =>
-    // Remove all lines/labels/boxes associated with one prediction key.
     if array.size(pred_line_keys) > 0
         for i = array.size(pred_line_keys) - 1 to 0
             if array.get(pred_line_keys, i) == key
@@ -279,7 +677,6 @@ trim_pred_patterns_if_needed() =>
     0
 
 cleanup_pred() =>
-    // Purge predictions whose time symmetry failed or timeout expired.
     if array.size(pred_keys) > 0
         for i = array.size(pred_keys) - 1 to 0
             string key = array.get(pred_keys, i)
@@ -298,41 +695,18 @@ cleanup_pred() =>
                 array.remove(pred_tC, i)
                 array.remove(pred_pn, i)
 draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, tD, pD, name, is_bull, score, key) =>
-    c = is_bull ? color_bull : color_bear
-    color pred_c = color.new(c, line_fade_pred)
+    color pred_c = pattern_color(name, is_bull, line_fade_pred)
     add_pred_line(key, line.new(tX, pX, tA, pA, color=pred_c, width=line_w_pred))
     add_pred_line(key, line.new(tA, pA, tB, pB, color=pred_c, width=line_w_pred))
     add_pred_line(key, line.new(tB, pB, tC, pC, color=pred_c, width=line_w_pred))
     add_pred_line(key, line.new(tC, pC, tD, pD, color=pred_c, width=line_w_pred))
     add_pred_line(key, line.new(tX, pX, tB, pB, color=color.new(pred_c, 70), style=line.style_dashed, width=1))
     add_pred_line(key, line.new(tA, pA, tC, pC, color=color.new(pred_c, 70), style=line.style_dashed, width=1))
-    string txt = show_score ? (name + " (" + str.tostring(int(score)) + ")") : name
+    string txt = pattern_label_text(name, is_bull, score, true)
     add_pred_label(key, label.new(tD, pD, txt, color=color.new(pred_c, 90), textcolor=color.new(color.white, 0), style=is_bull ? label.style_label_up : label.style_label_down, size=size_from_input(label_size_opt)))
 
 draw_trade_levels_pred(tD, entry, tp1, tp2, sl, pn, is_bull, key) =>
-    if show_pred_levels
-        color tp_c = color.new(level_tp_base, 15)
-        color sl_c = color.new(level_sl_base, 15)
-        int t1 = tD
-        int t2 = tD + line_future
-        float risk = math.abs(entry - sl)
-        float rr1 = risk > 0 ? math.abs(tp1 - entry) / risk : na
-        float rr2 = risk > 0 ? math.abs(tp2 - entry) / risk : na
-        float risk_pct = entry != 0 ? (-100.0 * risk / entry) : na
-        string side = compact_level_text ? (is_bull ? "B " : "S ") : (is_bull ? "Bullish " : "Bearish ")
-        string prefix = side + pn + " "
-        string e_tag = compact_level_text ? "E: " : "Entry: "
-        string t1_tag = compact_level_text ? "T1: " : "TP1: "
-        string t2_tag = compact_level_text ? "T2: " : "TP2: "
-        string sl_tag = "SL: "
-        add_pred_line(key, line.new(t1, entry, t2, entry, color=color.new(color.gray, 70), style=line.style_dotted))
-        add_pred_line(key, line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed))
-        add_pred_line(key, line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed))
-        add_pred_line(key, line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed))
-        add_pred_label(key, label.new(t2, entry, prefix + e_tag + str.tostring(entry, format.mintick), color=color.new(color.black, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
-        add_pred_label(key, label.new(t2, tp1, prefix + t1_tag + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
-        add_pred_label(key, label.new(t2, tp2, prefix + t2_tag + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
-        add_pred_label(key, label.new(t2, sl,  prefix + sl_tag + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 78), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+    0
 
 sl_ratio_for(pn, xc_ratio) =>
     if pn == "Bat"
@@ -357,8 +731,6 @@ sl_price(pn, is_bull, pX, pC, XA, XC, cd) =>
     if pn == "Gartley" or pn == "Cypher"
         pX
     else if pn == "5-0"
-        // 5-0 stop uses 1.272 extension of CD from C toward D-side continuation.
-        // This keeps bullish SL below entry and bearish SL above entry.
         is_bull ? pC - (1.272 * cd) : pC + (1.272 * cd)
     else if pn == "Shark_113" or pn == "Shark_886"
         float xc_ratio = XA > 0 ? math.abs(pC - pX) / XA : na
@@ -369,53 +741,64 @@ sl_price(pn, is_bull, pX, pC, XA, XC, cd) =>
         float sl_ratio = sl_ratio_for(pn, xc_ratio)
         is_bull ? pX + ((1 - sl_ratio) * XA) : pX - ((1 - sl_ratio) * XA)
 
+prz_box_len(tbc) =>
+    int tbc_bars = math.max(1, int(math.round(math.abs(tbc))))
+    float time_tol = math.max(time_sym, 0.0)
+    int raw = int(math.round(float(tbc_bars) * (1.0 + time_tol) * prz_box_len_factor))
+    auto_prz_box_len ? math.max(prz_box_len_min, math.min(prz_box_len_max, raw)) : line_future
+
+xabc_ratio_text(XA, AB, BC, XC) =>
+    float xb = XA > 0 ? AB / XA : na
+    float ac = AB > 0 ? BC / AB : na
+    float xc = XA > 0 ? XC / XA : na
+    "XB " + (na(xb) ? "NA" : str.tostring(xb, "#.###")) + " | AC " + (na(ac) ? "NA" : str.tostring(ac, "#.###")) + " | XC " + (na(xc) ? "NA" : str.tostring(xc, "#.###"))
 
 
-draw_trade_levels(tD, entry, tp1, tp2, sl, pn, is_bull) =>
+
+draw_trade_levels(tD, entry, tp1, tp2, sl, pn, is_bull, key) =>
     if show_levels
-        color tp_c = color.new(level_tp_base, 0)
+        color tp_base = use_pattern_palette ? pattern_color_base(pn, is_bull) : level_tp_base
+        color tp_c = color.new(tp_base, 0)
         color sl_c = color.new(level_sl_base, 0)
         int t1 = tD
         int t2 = tD + line_future
         float risk = math.abs(entry - sl)
         float rr1 = risk > 0 ? math.abs(tp1 - entry) / risk : na
         float rr2 = risk > 0 ? math.abs(tp2 - entry) / risk : na
-        float risk_pct = entry != 0 ? (-100.0 * risk / entry) : na
-        string side = compact_level_text ? (is_bull ? "B " : "S ") : (is_bull ? "Bullish " : "Bearish ")
-        string prefix = side + pn + " "
+        float tp1_pct = entry != 0 ? (100.0 * math.abs(tp1 - entry) / math.abs(entry)) : na
+        float tp2_pct = entry != 0 ? (100.0 * math.abs(tp2 - entry) / math.abs(entry)) : na
+        float risk_pct = entry != 0 ? (100.0 * risk / math.abs(entry)) : na
+        float p_tp1 = pattern_prob(pn, 1)
+        float p_tp2 = pattern_prob(pn, 2)
+        float p_sl = pattern_prob(pn, 3)
+        string pct_tp1_txt = na(tp1_pct) ? "" : " | +" + str.tostring(tp1_pct, "#.##") + "%"
+        string pct_tp2_txt = na(tp2_pct) ? "" : " | +" + str.tostring(tp2_pct, "#.##") + "%"
+        string risk_txt = na(risk_pct) ? "" : "Risk " + str.tostring(risk_pct, "#.##") + "%"
+        string p1_txt = (show_prob_in_levels and not na(p_tp1)) ? " | P " + str.tostring(p_tp1, "#.0") + "%" : ""
+        string p2_txt = (show_prob_in_levels and not na(p_tp2)) ? " | P " + str.tostring(p_tp2, "#.0") + "%" : ""
+        string ps_txt = (show_prob_in_levels and not na(p_sl)) ? " | P " + str.tostring(p_sl, "#.0") + "%" : ""
+        string prefix = pattern_prefix_text(pn, is_bull)
         string e_tag = compact_level_text ? "E: " : "Entry: "
         string t1_tag = compact_level_text ? "T1: " : "TP1: "
         string t2_tag = compact_level_text ? "T2: " : "TP2: "
         string sl_tag = "SL: "
-        line.new(t1, entry, t2, entry, color=color.new(color.gray, 50), style=line.style_dotted)
-        line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed)
-        line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed)
-        line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed)
-        label.new(t2, entry, prefix + e_tag + str.tostring(entry, format.mintick), color=color.new(color.black, 72), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
-        label.new(t2, tp1, prefix + t1_tag + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + ")"), color=color.new(tp_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
-        label.new(t2, tp2, prefix + t2_tag + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + ")"), color=color.new(tp_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
-        label.new(t2, sl,  prefix + sl_tag + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (Risk " + str.tostring(risk_pct, "#.##") + "%)"), color=color.new(sl_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt))
+        add_conf_line(key, line.new(t1, entry, t2, entry, color=color.new(color.gray, 50), style=line.style_dotted))
+        add_conf_line(key, line.new(t1, tp1, t2, tp1, color=tp_c, style=line.style_dashed))
+        add_conf_line(key, line.new(t1, tp2, t2, tp2, color=tp_c, style=line.style_dashed))
+        add_conf_line(key, line.new(t1, sl,  t2, sl,  color=sl_c, style=line.style_dashed))
+        add_conf_label(key, label.new(t2, entry, prefix + e_tag + str.tostring(entry, format.mintick), color=color.new(color.black, 72), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+        add_conf_label(key, label.new(t2, tp1, prefix + t1_tag + str.tostring(tp1, format.mintick) + (na(rr1) ? "" : " (RR " + str.tostring(rr1, "#.##") + pct_tp1_txt + p1_txt + ")"), color=color.new(tp_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+        add_conf_label(key, label.new(t2, tp2, prefix + t2_tag + str.tostring(tp2, format.mintick) + (na(rr2) ? "" : " (RR " + str.tostring(rr2, "#.##") + pct_tp2_txt + p2_txt + ")"), color=color.new(tp_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
+        add_conf_label(key, label.new(t2, sl,  prefix + sl_tag + str.tostring(sl, format.mintick) + (na(risk_pct) ? "" : " (" + risk_txt + ps_txt + ")"), color=color.new(sl_c, 80), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size_from_input(level_label_size_opt)))
 
-// =====================================================
-// 2) PRZ 計算 + 觸發判斷（保留你原本的 XD/BD 交集）
-// =====================================================
-// 2) PRZ logic: build overlap zone, detect touch, then route to predicted/confirmed flow.
 target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_low_r, BD_high_r, pn, is_bull, score) =>
-    // PRZ engine:
-    // 1) derive XD and BD price zones
-    // 2) take overlap as final PRZ
-    // 3) detect whether PRZ has already been touched (is_trig)
-    // 4) draw predicted or confirmed objects accordingly
     if pn != "None"
-        // XD 區間（以 X 為 anchor）
         float d_xd_low  = is_bull ? pX + ((1 - XD_low_r)  * XA) : pX - ((1 - XD_low_r)  * XA)
         float d_xd_high = is_bull ? pX + ((1 - XD_high_r) * XA) : pX - ((1 - XD_high_r) * XA)
 
-        // BD 區間（以 B 為 anchor）
         float d_bd_low  = is_bull ? pB + ((1 - BD_low_r)  * BC) : pB - ((1 - BD_low_r)  * BC)
         float d_bd_high = is_bull ? pB + ((1 - BD_high_r) * BC) : pB - ((1 - BD_high_r) * BC)
 
-        // 兩區間排序
         float tmp = math.min(d_xd_low, d_xd_high)
         d_xd_high := math.max(d_xd_low, d_xd_high)
         d_xd_low  := tmp
@@ -424,12 +807,20 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_
         d_bd_high := math.max(d_bd_low, d_bd_high)
         d_bd_low  := tmp
 
-        float d_low  = math.max(d_xd_low, d_bd_low)
-        float d_high = math.min(d_xd_high, d_bd_high)
+        int prz_mode = prz_mode_for(pn)
+        float d_low = na
+        float d_high = na
+        if prz_mode == 1
+            d_low := d_bd_low
+            d_high := d_bd_high
+        else if prz_mode == 2
+            d_low := d_xd_low
+            d_high := d_xd_high
+        else
+            d_low := math.max(d_xd_low, d_bd_low)
+            d_high := math.min(d_xd_high, d_bd_high)
 
-        // Continue only when XD and BD overlap into a valid PRZ.
         if d_low <= d_high
-            // 歷史觸發檢查：從 C 到現在
             bool is_trig = false
             int  trigger_bar = na
             int  trigger_i = na
@@ -437,8 +828,6 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_
 
             int maxLook = bar_index - tC
             maxLook := math.max(0, maxLook)
-            // Search all touches and keep the most extreme one inside PRZ.
-            // This improves "push into PRZ then reject" detection.
             float best_touch_price = na
             for i = 0 to maxLook
                 bool touched = low[i] <= d_high and high[i] >= d_low
@@ -484,11 +873,15 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_
                 time_d_ok := score_time_sym(TBC, TCD, time_sym) > 0
             bool rev_ok = is_trig ? reversal_ok_at(bar_index - trigger_bar, is_bull) : true
             bool time_expired = (not is_trig) and (TBC > 0) and (float(bar_index - tC) > TBC * time_limit_mult)
-            float reject_move = ta.atr(reject_atr_len) * reject_atr_mult
+            float reject_move = reject_atr * reject_atr_mult
             bool reject_ok = false
             if is_trig and not na(trigger_i) and trigger_i > 0
                 reject_ok := is_bull ? (close >= low[trigger_i] + reject_move) : (close <= high[trigger_i] - reject_move)
-            bool confirm_ok = is_trig ? ((rev_ok and d_is_extreme and not prz_breach) or (confirm_on_reject and reject_ok and not prz_breach)) : false
+            bool confirm_ok = na
+            if compat_mode
+                confirm_ok := is_trig ? (not prz_breach) : false
+            else
+                confirm_ok := is_trig ? ((rev_ok and d_is_extreme and not prz_breach) or (confirm_on_reject and reject_ok and not prz_breach)) : false
             if show_no_confirm_reason and is_trig and not confirm_ok
                 string fail_reason = ""
                 if prz_breach
@@ -506,14 +899,11 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_
                 add_fail_reason_label(base_key, fail_lb)
             else
                 remove_fail_reason_label(base_key)
-            // allow_draw gates both predicted and confirmed outputs.
             bool allow_draw = (is_trig ? confirm_ok : (time_d_ok and not time_expired)) and not array.includes(drawn_keys, key)
 
             if allow_draw and (d_high + d_low) / 2.0 > 0
-                array.push(drawn_keys, key)
-                trim_keys_if_needed()
-
                 float entry = (d_high + d_low) / 2.0
+                int prz_w = prz_box_len(TBC)
                 float ad = math.abs(entry - pA)
                 float cd = math.abs(entry - pC)
                 float tp_base = (pn == "Cypher" or pn == "Shark_113" or pn == "Shark_886" or pn =="5-0") ? cd : ad
@@ -523,314 +913,287 @@ target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC,  XD_low_r, XD_high_r, BD_
                 float tp1 = is_bull ? entry + tp_base * tp_r1 : entry - tp_base * tp_r1
                 float tp2 = is_bull ? entry + tp_base * tp_r2 : entry - tp_base * tp_r2
                 float sl = sl_price(pn, is_bull, pX, pC, XA, XC, cd)
+                float risk = math.abs(entry - sl)
+                float reward1 = math.abs(tp1 - entry)
+                float rr1 = risk > 0 ? (reward1 / risk) : na
+                float tp1_profit_pct = entry != 0 ? (100.0 * math.abs(tp1 - entry) / math.abs(entry)) : 0.0
+                bool profit_ok = (not compat_mode) or (tp1_profit_pct >= min_profit_pct)
+                bool rr_ok = not na(rr1) and rr1 >= 1.0
+                bool setup_ok = profit_ok and rr_ok
+                bool dedup_ok = true
+                string grp_key = dedup_group_key(pn, is_bull)
+                if setup_ok and is_trig and dedup_enabled and array.size(kept_keys) > 0
+                    float best_conflict_score = na
+                    bool has_conflict = false
+                    for i = array.size(kept_keys) - 1 to 0
+                        string prev_base_key = array.get(kept_base_keys, i)
+                        bool active_conf = trade_tracker_is_fresh(prev_base_key)
+                        bool same_group = array.get(kept_groups, i) == grp_key
+                        bool close_d = math.abs(array.get(kept_tD, i) - trigger_bar) <= dedup_d_bars
+                        bool close_entry = entry_close_pct(entry, array.get(kept_entry, i), dedup_entry_pct)
+                        if active_conf and same_group and close_d and close_entry
+                            has_conflict := true
+                            float prev_score = array.get(kept_score, i)
+                            best_conflict_score := na(best_conflict_score) ? prev_score : math.max(best_conflict_score, prev_score)
+                    if has_conflict and not na(best_conflict_score) and score <= best_conflict_score
+                        dedup_ok := false
+                    else if has_conflict
+                        for i = array.size(kept_keys) - 1 to 0
+                            string prev_base_key = array.get(kept_base_keys, i)
+                            bool active_conf = trade_tracker_is_fresh(prev_base_key)
+                            bool same_group = array.get(kept_groups, i) == grp_key
+                            bool close_d = math.abs(array.get(kept_tD, i) - trigger_bar) <= dedup_d_bars
+                            bool close_entry = entry_close_pct(entry, array.get(kept_entry, i), dedup_entry_pct)
+                            if active_conf and same_group and close_d and close_entry
+                                remove_kept_record_at(i, true)
+                bool final_ok = setup_ok and dedup_ok
 
-                if (not is_trig)
-                    // Prediction path: PRZ exists but no valid D confirmation yet.
-                    // Draw prediction and keep it tracked for future cleanup.
-                    add_pred_pattern(base_key, tB, tC, pn)
-                    trim_pred_patterns_if_needed()
-                    if show_predicted
-                        if show_prz_box
-                            add_pred_box(base_key, box.new(bar_index, d_high, bar_index + line_future, d_low, border_color=color.new(prz_base, 0), bgcolor=color.new(prz_base, prz_fill_alpha)))
-                        draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, bar_index, (d_high + d_low) / 2.0, pn, is_bull, score, base_key)
-                    draw_trade_levels_pred(bar_index, entry, tp1, tp2, sl, pn, is_bull, base_key)
-                else
-                    // Confirmation path: remove prediction and render final structure.
-                    // Remove old prediction objects, then draw confirmed pattern.
+                if not final_ok
                     remove_pred_by_key(base_key)
-                    draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, trigger_bar, trigger_price, pn, is_bull, score)
-                    draw_trade_levels(trigger_bar, entry, tp1, tp2, sl, pn, is_bull)
+                else
+                    array.push(drawn_keys, key)
+                    trim_keys_if_needed()
+                    if not is_trig
+                        add_pred_pattern(base_key, tB, tC, pn)
+                        trim_pred_patterns_if_needed()
+                        if show_predicted
+                            if show_prz_box
+                                color prz_c = use_pattern_palette ? pattern_color_base(pn, is_bull) : prz_base
+                                add_pred_box(base_key, box.new(bar_index, d_high, bar_index + prz_w, d_low, border_color=color.new(prz_c, 0), bgcolor=color.new(prz_c, prz_fill_alpha)))
+                                if show_prz_ratio_numbers
+                                    add_pred_label(base_key, label.new(bar_index + prz_w, d_high, xabc_ratio_text(XA, AB, BC, XC), color=color.new(prz_c, 85), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size.tiny))
+                            draw_harmonic_pred(tX, pX, tA, pA, tB, pB, tC, pC, bar_index, (d_high + d_low) / 2.0, pn, is_bull, score, base_key)
+                        draw_trade_levels_pred(bar_index, entry, tp1, tp2, sl, pn, is_bull, base_key)
+                    else
+                        remove_pred_by_key(base_key)
+                        draw_harmonic(tX, pX, tA, pA, tB, pB, tC, pC, trigger_bar, trigger_price, pn, is_bull, score, key)
+                        draw_trade_levels(trigger_bar, entry, tp1, tp2, sl, pn, is_bull, key)
+                        if show_prz_box and keep_confirmed_prz_box
+                            color prz_c = use_pattern_palette ? pattern_color_base(pn, is_bull) : prz_base
+                            add_conf_box(key, box.new(trigger_bar, d_high, trigger_bar + prz_w, d_low, border_color=color.new(prz_c, 0), bgcolor=color.new(prz_c, prz_fill_alpha)))
+                            if show_prz_ratio_numbers
+                                add_conf_label(key, label.new(trigger_bar + prz_w, d_high, xabc_ratio_text(XA, AB, BC, XC), color=color.new(prz_c, 85), textcolor=color.new(color.white, 0), style=label.style_label_left, size=size.tiny))
+                        add_trade_tracker(base_key, pn, is_bull, trigger_bar, entry, tp1, tp2, sl)
+                        if dedup_enabled
+                            add_kept_record(key, base_key, grp_key, trigger_bar, entry, score)
         0
 
-// =====================================================
-// 3) 掃描引擎（加入：時間對稱/交替/趨勢/分數）
-// 注意：ta.pivot 的 rightbars 不能很好地動態迴圈，
-// 所以我們用「密集手動展開」來做到更多尺度掃描。
-// =====================================================
-// 3) Scanner core: identify candidate XABC and score pattern quality.
 run_scanner(len) =>
-    // Scanner for one rightbars length. Called repeatedly for multi-scale search.
-    // 固定 left=2，right=len
-    float ph = ta.pivothigh(high, 2, len)
-    float pl = ta.pivotlow(low, 2, len)
+    bool in_scan_range = len >= scan_min and len <= scan_max
+    bool step_ok = in_scan_range and ((len - scan_min) % math.max(scan_step, 1) == 0)
+    bool compat_ok = (not compat_mode) or ((len % 2 == 1) and (len <= 49))
+    if step_ok and compat_ok
+        float ph = ta.pivothigh(high, 2, len)
+        float pl = ta.pivotlow(low, 2, len)
 
-    var float[] p_cache = array.new_float(5, na)
-    var int[]   t_cache = array.new_int(5, na)
-    var int last_pivot_type = 0
+        var float[] p_cache = array.new_float(5, na)
+        var int[] t_cache = array.new_int(5, na)
+        var int last_pivot_type = 0
 
-    if not na(ph) or not na(pl)
-        int curr_type = not na(ph) ? 1 : -1
-        if curr_type != last_pivot_type
-            array.insert(p_cache, 0, not na(ph) ? ph : pl)
-            array.insert(t_cache, 0, bar_index - len)
+        if not na(ph) or not na(pl)
+            int curr_type = not na(ph) ? 1 : -1
+            if curr_type != last_pivot_type
+                array.insert(p_cache, 0, not na(ph) ? ph : pl)
+                array.insert(t_cache, 0, bar_index - len)
+                array.pop(p_cache)
+                array.pop(t_cache)
+                last_pivot_type := curr_type
 
-            array.pop(p_cache)
-            array.pop(t_cache)
-            last_pivot_type := curr_type
-
-        // 確保已經有 X,A,B,C
-        if not na(array.get(t_cache, 3))
-            // Cache order: [0]=C, [1]=B, [2]=A, [3]=X.
             float pC = array.get(p_cache, 0), int tC = array.get(t_cache, 0)
             float pB = array.get(p_cache, 1), int tB = array.get(t_cache, 1)
             float pA = array.get(p_cache, 2), int tA = array.get(t_cache, 2)
             float pX = array.get(p_cache, 3), int tX = array.get(t_cache, 3)
 
-            // 時間順序
-            bool time_valid = tC > tB and tB > tA and tA > tX
-            if time_valid
-                float XA = math.abs(pA - pX)
-                float AB = math.abs(pB - pA)
-                float BC = math.abs(pC - pB)
-                float XC = math.abs(pC - pX)
+            if not na(tX)
+                bool time_valid = tC > tB and tB > tA and tA > tX
+                if time_valid
+                    float XA = math.abs(pA - pX)
+                    float AB = math.abs(pB - pA)
+                    float BC = math.abs(pC - pB)
+                    float XC = math.abs(pC - pX)
 
-                // 避免除 0
-                if XA > 0 and AB > 0
-                    float XB = AB / XA
-                    float AC = BC / AB
+                    if XA > 0 and AB > 0
+                        float XB = AB / XA
+                        float AC = BC / AB
 
-                    bool is_bull = pX < pA
-                    bool swing_ok = is_bull ? (pA > pB and pB < pC) : (pA < pB and pB > pC)
-                    bool tr_ok = trend_ok(is_bull, trend_len)
+                        bool is_bull = pX < pA
+                        bool swing_ok = is_bull ? (pA > pB and pB < pC) : (pA < pB and pB > pC)
+                        bool tr_ok = trend_ok(is_bull, trend_ma)
 
-                    if swing_ok and tr_ok
-                        // Structural quality dimensions (time + alternation).
-                        // 時間對稱 / 交替
-                        float TAB = float(tB - tA)
-                        float TBC = float(tC - tB)
+                        if swing_ok and tr_ok
+                            float TAB = float(tB - tA)
+                            float TBC = float(tC - tB)
 
-                        float s_time = score_time_sym(TAB, TBC, time_sym)
-                        float s_alt  = score_alternation(AB, BC, TAB, TBC, alt_ratio)
+                            float s_time = score_time_sym(TAB, TBC, time_sym)
+                            float s_alt = score_alternation(AB, BC, TAB, TBC, alt_ratio)
 
-                        // 型態識別：用「分數」把嚴格度拉滿
-                        string pn = "None"
-                        float XD_hi = 0.0, XD_lo = 0.0, BD_hi = 0.0, BD_lo = 0.0
-                        float s_ratio = 0.0
+                            string pn = "None"
+                            float XD_hi = 0.0, XD_lo = 0.0, BD_hi = 0.0, BD_lo = 0.0
+                            float s_ratio = 0.0
 
-                        // ---- Bat ----
-                        if in_range(XB, 0.382*(1-tol), 0.5*(1+tol)) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
-                            pn := "Bat"
-                            XD_hi := 0.886*(1+tol), XD_lo := 0.886*(1-tol)
-                            BD_hi := 2.618*(1+tol), BD_lo := 1.618*(1-tol)
-                            s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.5*(1+tol)) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(0.886, 0.886, tol)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_bat and in_range(XB, 0.382 * (1 - tol), 0.5 * (1 + tol)) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol))
+                                pn := "Bat"
+                                XD_hi := 0.886 * (1 + tol), XD_lo := 0.886 * (1 - tol)
+                                BD_hi := 2.618 * (1 + tol), BD_lo := 1.618 * (1 - tol)
+                                s_ratio := (score_in_range(XB, 0.382 * (1 - tol), 0.5 * (1 + tol)) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_near(0.886, 0.886, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Alt Bat ----
-                        if near(XB, 0.382, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
-                            pn := "Alt Bat"
-                            XD_hi := 1.13*(1+tol), XD_lo := 1.13*(1-tol)
-                            BD_hi := 3.618*(1+tol), BD_lo := 2.0*(1-tol)
-                            s_ratio := (score_near(XB, 0.382, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(1.13, 1.13, tol)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_alt_bat and near(XB, 0.382, tol) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol))
+                                pn := "Alt Bat"
+                                XD_hi := 1.13 * (1 + tol), XD_lo := 1.13 * (1 - tol)
+                                BD_hi := 3.618 * (1 + tol), BD_lo := 2.0 * (1 - tol)
+                                s_ratio := (score_near(XB, 0.382, tol) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_near(1.13, 1.13, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Butterfly ----
-                        if near(XB, 0.786, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
-                            pn := "Butterfly"
-                            XD_hi := 1.414*(1+tol), XD_lo := 1.27*(1-tol)
-                            BD_hi := 2.24*(1+tol),  BD_lo := 1.618*(1-tol)
-                            s_ratio := (score_near(XB, 0.786, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_in_range(1.33, XD_lo, XD_hi)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_butterfly and near(XB, 0.786, tol) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol))
+                                pn := "Butterfly"
+                                XD_hi := 1.414 * (1 + tol), XD_lo := 1.27 * (1 - tol)
+                                BD_hi := 2.24 * (1 + tol), BD_lo := 1.618 * (1 - tol)
+                                s_ratio := (score_near(XB, 0.786, tol) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_in_range(1.33, XD_lo, XD_hi)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Crab ----
-                        if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
-                            pn := "Crab"
-                            XD_hi := 1.618*(1+tol), XD_lo := 1.618*(1-tol)
-                            BD_hi := 3.618*(1+tol), BD_lo := 2.618*(1-tol)
-                            s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(1.618, 1.618, tol)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_crab and in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol))
+                                pn := "Crab"
+                                XD_hi := 1.618 * (1 + tol), XD_lo := 1.618 * (1 - tol)
+                                BD_hi := 3.618 * (1 + tol), BD_lo := 2.618 * (1 - tol)
+                                s_ratio := (score_in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_near(1.618, 1.618, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Deep Crab ----
-                        if near(XB, 0.886, tol) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
-                            pn := "Deep Crab"
-                            XD_hi := 1.618*(1+tol), XD_lo := 1.618*(1-tol)
-                            BD_hi := 3.618*(1+tol), BD_lo := 2.0*(1-tol)
-                            s_ratio := (score_near(XB, 0.886, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(1.618, 1.618, tol)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_deep_crab and near(XB, 0.886, tol) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol))
+                                pn := "Deep Crab"
+                                XD_hi := 1.618 * (1 + tol), XD_lo := 1.618 * (1 - tol)
+                                BD_hi := 3.618 * (1 + tol), BD_lo := 2.0 * (1 - tol)
+                                s_ratio := (score_near(XB, 0.886, tol) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_near(1.618, 1.618, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Gartley ----
-                        if in_range(XB, 0.618*(1-tol), 0.618*(1+tol)) and in_range(AC, 0.382*(1-tol), 0.886*(1+tol))
-                            pn := "Gartley"
-                            XD_hi := 0.786*(1+tol), XD_lo := 0.786*(1-tol)
-                            BD_hi := 1.618*(1+tol), BD_lo := 1.13*(1-tol)
-                            s_ratio := (score_near(XB, 0.618, tol) + score_in_range(AC, 0.382*(1-tol), 0.886*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_gartley and in_range(XB, 0.618 * (1 - tol), 0.618 * (1 + tol)) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol))
+                                pn := "Gartley"
+                                XD_hi := 0.786 * (1 + tol), XD_lo := 0.786 * (1 - tol)
+                                BD_hi := 1.618 * (1 + tol), BD_lo := 1.13 * (1 - tol)
+                                s_ratio := (score_near(XB, 0.618, tol) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_near(0.786, 0.786, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Shark (可選) ----
-                        if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
-                            pn := "Shark_886"
-                            XD_hi := 1.13*(1+tol), XD_lo := 0.886*(1-tol) // 這裡用區間而非單點
-                            BD_hi := 2.24*(1+tol), BD_lo := 1.618*(1-tol)
-                            s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_deep_gartley and in_range(XB, 0.618 * (1 - tol), 0.618 * (1 + tol)) and in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) and (not compat_mode or near(XB, 0.618, strict_tol))
+                                pn := "Deep Gartley"
+                                XD_hi := 0.886 * (1 + tol), XD_lo := 0.886 * (1 - tol)
+                                BD_hi := 1.618 * (1 + tol), BD_lo := 1.27 * (1 - tol)
+                                s_ratio := (score_near(XB, 0.618, tol) + score_in_range(AC, 0.382 * (1 - tol), 0.886 * (1 + tol)) + score_near(0.886, 0.886, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-						if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.618*(1+tol))
-                            pn := "Shark_113"
-                            XD_hi := 1.13*(1+tol), XD_lo := 1.13*(1-tol) // 這裡用區間而非單點
-                            BD_hi := 2.24*(1+tol), BD_lo := 1.618*(1-tol)
-                            s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_shark_886 and in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) and in_range(AC, (compat_mode ? 1.27 : 1.13) * (1 - tol), 1.618 * (1 + tol))
+                                pn := "Shark_886"
+                                XD_hi := compat_mode ? 0.886 * (1 + tol) : 1.13 * (1 + tol)
+                                XD_lo := 0.886 * (1 - tol)
+                                BD_hi := 2.24 * (1 + tol), BD_lo := 1.618 * (1 - tol)
+                                s_ratio := (score_in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) + score_in_range(AC, (compat_mode ? 1.27 : 1.13) * (1 - tol), 1.618 * (1 + tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        // ---- Cypher ----
-                        if in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) and in_range(AC, 1.13*(1-tol), 1.414*(1+tol))
-                            pn := "Cypher"
-                            XD_hi := 0.786*(1+tol), XD_lo := 0.786*(1-tol)
-                            BD_hi := 2.0*(1+tol),  BD_lo := 1.272*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
-                            s_ratio := (score_in_range(XB, 0.382*(1-tol), 0.618*(1+tol)) + score_in_range(AC, 1.13*(1-tol), 1.414*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
-                            if pn != "None"
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_shark_113 and in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) and in_range(AC, 1.13 * (1 - tol), (compat_mode ? 2.24 : 1.618) * (1 + tol))
+                                pn := "Shark_113"
+                                XD_hi := 1.13 * (1 + tol), XD_lo := 1.13 * (1 - tol)
+                                BD_hi := 2.24 * (1 + tol), BD_lo := (compat_mode ? 1.13 : 1.618) * (1 - tol)
+                                s_ratio := (score_in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) + score_in_range(AC, 1.13 * (1 - tol), (compat_mode ? 2.24 : 1.618) * (1 + tol)) + score_in_range(1.0, XD_lo, XD_hi)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-                        if in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) and in_range(AC, 1.618*(1-tol), 2.24*(1+tol))
-                            pn := "5-0"
-                            XD_hi := 3*(1+tol), XD_lo := 0*(1-tol)
-                            BD_hi := 0.5*(1+tol),  BD_lo := 0.5*(1-tol)  // 常見 Cypher BD 約 1.272~2.0
-                            s_ratio := (score_in_range(XB, 1.13*(1-tol), 1.618*(1+tol)) + score_in_range(AC, 1.618*(1-tol), 2.24*(1+tol)) + score_near(0.786, 0.786, tol)) / 3.0
-                            if pn != "None" 
-                                // Weighted score: ratio 55%, time symmetry 25%, alternation 20%.
-                                float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
-                                if score >= min_score
-                                    target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC,XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
+                            if use_cypher and in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) and in_range(AC, (compat_mode ? 1.272 : 1.13) * (1 - tol), 1.414 * (1 + tol)) and (not compat_mode or near(XB, 0.5, strict_tol * 2.0))
+                                pn := "Cypher"
+                                XD_hi := 0.786 * (1 + tol), XD_lo := 0.786 * (1 - tol)
+                                BD_hi := 2.0 * (1 + tol), BD_lo := 1.272 * (1 - tol)
+                                s_ratio := (score_in_range(XB, 0.382 * (1 - tol), 0.618 * (1 + tol)) + score_in_range(AC, (compat_mode ? 1.272 : 1.13) * (1 - tol), 1.414 * (1 + tol)) + score_near(0.786, 0.786, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-// =====================================================
-// 4) 多尺度掃描（更密 + 覆蓋 10~500）
-// 說明：Pine 對 pivot 參數動態迴圈限制多，所以用「密集展開」達到你要的更多時間區間掃描
-// =====================================================
-// 4) Execute scanner across many lengths to approximate dynamic pivot search.
+                            if use_50 and in_range(XB, 1.13 * (1 - tol), 1.618 * (1 + tol)) and in_range(AC, 1.618 * (1 - tol), 2.24 * (1 + tol))
+                                pn := "5-0"
+                                XD_hi := 3 * (1 + tol), XD_lo := 0 * (1 - tol)
+                                BD_hi := 0.5 * (1 + tol), BD_lo := 0.5 * (1 - tol)
+                                s_ratio := (score_in_range(XB, 1.13 * (1 - tol), 1.618 * (1 + tol)) + score_in_range(AC, 1.618 * (1 - tol), 2.24 * (1 + tol)) + score_near(0.786, 0.786, tol)) / 3.0
+                                if pn != "None"
+                                    float score = 0.55 * s_ratio + 0.25 * s_time + 0.20 * s_alt
+                                    if score >= min_score
+                                        target(tX, pX, tA, pA, tB, pB, tC, pC, XA, AB, BC, XC, XD_lo, XD_hi, BD_lo, BD_hi, pn, is_bull, score)
 
-// 保底：按你的 input 控制掃描範圍，但我們仍需用手動展開做主體。
-// 這裡採「10~200 每 10」+「220~500 每 20」的折衷：很密、但不至於爆炸。
+prune_inactive_kept_records()
 cleanup_pred()
-// 你也可以把下面再加得更密（會更吃效能）。
+// Keep fixed call-sites so each length has isolated `var` state in Pine.
+run_scanner(1)
+run_scanner(2)
+run_scanner(3)
+run_scanner(4)
+run_scanner(5)
+run_scanner(6)
+run_scanner(7)
+run_scanner(8)
+run_scanner(9)
 run_scanner(10)
+run_scanner(11)
+run_scanner(12)
+run_scanner(13)
+run_scanner(14)
 run_scanner(15)
+run_scanner(16)
+run_scanner(17)
+run_scanner(18)
+run_scanner(19)
 run_scanner(20)
+run_scanner(21)
+run_scanner(22)
+run_scanner(23)
+run_scanner(24)
 run_scanner(25)
+run_scanner(26)
+run_scanner(27)
+run_scanner(28)
+run_scanner(29)
 run_scanner(30)
+run_scanner(31)
+run_scanner(32)
+run_scanner(33)
+run_scanner(34)
 run_scanner(35)
+run_scanner(36)
+run_scanner(37)
+run_scanner(38)
+run_scanner(39)
 run_scanner(40)
+run_scanner(41)
+run_scanner(42)
+run_scanner(43)
+run_scanner(44)
 run_scanner(45)
+run_scanner(46)
+run_scanner(47)
+run_scanner(48)
+run_scanner(49)
 run_scanner(50)
-run_scanner(55)
-run_scanner(60)
-run_scanner(65)
-run_scanner(70)
-run_scanner(75)
-run_scanner(80)
-run_scanner(85)
-run_scanner(90)
-run_scanner(95)
-run_scanner(100)
-run_scanner(105)
-run_scanner(110)
-run_scanner(115)
-run_scanner(120)
-run_scanner(125)
-run_scanner(130)
-run_scanner(135)
-run_scanner(140)
-run_scanner(145)
-run_scanner(150)
-run_scanner(155)
-run_scanner(160)
-run_scanner(165)
-run_scanner(170)
-run_scanner(175)
-run_scanner(180)
-run_scanner(185)
-run_scanner(190)
-run_scanner(195)
-run_scanner(200)
-run_scanner(205)
-run_scanner(210)
-run_scanner(215)
-run_scanner(220)
-run_scanner(225)
-run_scanner(230)
-run_scanner(235)
-run_scanner(240)
-run_scanner(245)
-run_scanner(250)
-run_scanner(255)
-run_scanner(260)
-run_scanner(265)
-run_scanner(270)
-run_scanner(275)
-run_scanner(280)
-run_scanner(285)
-run_scanner(290)
-run_scanner(295)
-run_scanner(300)
-run_scanner(305)
-run_scanner(310)
-run_scanner(315)
-run_scanner(320)
-run_scanner(325)
-run_scanner(330)
-run_scanner(335)
-run_scanner(340)
-run_scanner(345)
-run_scanner(350)
-run_scanner(355)
-run_scanner(360)
-run_scanner(365)
-run_scanner(370)
-run_scanner(375)
-run_scanner(380)
-run_scanner(385)
-run_scanner(390)
-run_scanner(395)
-run_scanner(400)
-run_scanner(405)
-run_scanner(410)
-run_scanner(415)
-run_scanner(420)
-run_scanner(425)
-run_scanner(430)
-run_scanner(435)
-run_scanner(440)
-run_scanner(445)
-run_scanner(450)
-run_scanner(455)
-run_scanner(460)
-run_scanner(465)
-run_scanner(470)
-run_scanner(475)
-run_scanner(480)
-run_scanner(485)
-run_scanner(490)
-run_scanner(495)
-run_scanner(500)
+process_trade_trackers()
+render_stats_table()
