@@ -8,8 +8,8 @@ pivotRightBars = input.int(3, "Pivot Right Bars (右側轉折根數)", minval=1,
 
 grpScan = "Scan Period Settings (掃描週期設定)"
 scanStartLen = input.int(1, "Start Length (掃描週期下限)", minval=1, maxval=100, group=grpScan)
-scanEndLen = input.int(50, "End Length (掃描週期上限)", minval=1, maxval=200, group=grpScan)
-scanRangeStep = input.int(2, "Range Step (掃描週期間隔)", minval=1, maxval=20, group=grpScan)
+scanEndLen = input.int(120, "End Length (掃描週期上限)", minval=1, maxval=200, group=grpScan)
+scanRangeStep = input.int(1, "Range Step (掃描週期間隔)", minval=1, maxval=20, group=grpScan)
 
 grpPattern = "Pattern (型態)"
 enableGartley = input.bool(true, "Enable Gartley (啟用 Gartley)", group=grpPattern)
@@ -21,7 +21,7 @@ enableCrab = input.bool(true, "Enable Crab (啟用 Crab)", group=grpPattern)
 enableDeepCrab = input.bool(true, "Enable Deep Crab (啟用 Deep Crab)", group=grpPattern)
 enableCypher = input.bool(true, "Enable Cypher (啟用 Cypher)", group=grpPattern)
 cypherLogicMode = input.string("Reference (C outside XA)", "Cypher Logic Mode (Cypher 邏輯模式)", options=["Reference (C outside XA)", "Custom (C inside XA)"], group=grpPattern)
-sharkLogicMode = input.string("Reference (AB/XA+BC/AB+CD/BC+XD/XA)", "Shark Logic Mode (鯊魚邏輯模式)", options=["Reference (AB/XA+BC/AB+CD/BC+XD/XA)", "Classic OX"], group=grpPattern)
+sharkLogicMode = input.string("Reference (XB/XA+AC/XA+BD/XA+XD/XA)", "Shark Logic Mode (鯊魚邏輯模式)", options=["Reference (XB/XA+AC/XA+BD/XA+XD/XA)", "Reference (XB/XA+AC/XA+BD/BC+XD/XA)", "Classic OX"], group=grpPattern)
 enableShark0886 = input.bool(true, "Enable Shark 0.886 (啟用 Shark 0.886)", group=grpPattern)
 enableShark113 = input.bool(true, "Enable Shark 1.13 (啟用 Shark 1.13)", group=grpPattern)
 enableFiveO = input.bool(true, "Enable 5-0 (啟用 5-0)", group=grpPattern)
@@ -37,6 +37,7 @@ slBufferPercent = input.float(0.30, "SL Buffer Percent (停損緩衝百分比)",
 slAtrLen = input.int(14, "SL ATR Length (停損 ATR 週期)", minval=1, group=grpRisk)
 slAtrMult = input.float(0.25, "SL ATR Multiplier (停損 ATR 倍數)", minval=0.01, step=0.01, group=grpRisk)
 useCypherXStop = input.bool(true, "Cypher SL at X Outside (Cypher 停損放在 X 外側)", group=grpRisk)
+hitToleranceTicks = input.int(1, "Hit Tolerance Ticks (觸價容差Ticks)", minval=0, maxval=20, group=grpRisk)
 
 grpFilter = "Filters (濾網)"
 useTimeSymmetry = input.bool(false, "Use Time Symmetry Filter (使用時間對稱濾網)", group=grpFilter)
@@ -74,9 +75,11 @@ var int[] swType = array.new_int() // 1=high, -1=low
 
 // Multi-scale independent scan state (avoid mixing pivots from different lengths)
 var int scanLenCap = 220
-var float[] msPrice = array.new_float((220 + 1) * 5, na)
-var int[] msBar = array.new_int((220 + 1) * 5, na)
-var int[] msType = array.new_int((220 + 1) * 5, 0)
+scanPivotDepth = 6
+scanComboCount = 6
+var float[] msPrice = array.new_float((220 + 1) * 6, na)
+var int[] msBar = array.new_int((220 + 1) * 6, na)
+var int[] msType = array.new_int((220 + 1) * 6, 0)
 var int[] msLastType = array.new_int(220 + 1, 0)
 
 var string[] emittedKeys = array.new_string()
@@ -97,6 +100,9 @@ var float[] trTP1 = array.new_float()
 var float[] trTP2 = array.new_float()
 var bool[] trStarted = array.new_bool()
 var bool[] trTP1Hit = array.new_bool()
+var label[] trLabelRef = array.new_label()
+var string[] trLabelHead = array.new_string()
+var string[] trLabelBody = array.new_string()
 
 // ---------------- Utility ----------------
 inRange(value, low, high) =>
@@ -116,6 +122,21 @@ clamp01(v) =>
 
 fmtRatio(v) =>
     str.tostring(v, "#.###")
+
+hitTol() =>
+    syminfo.mintick * hitToleranceTicks
+
+isInPrzBar(h, l, przLow, przHigh, tol) =>
+    h >= (przLow - tol) and l <= (przHigh + tol)
+
+isHitTP1Bar(isBull, h, l, tp1, tol) =>
+    isBull ? (h >= (tp1 - tol)) : (l <= (tp1 + tol))
+
+isHitTP2Bar(isBull, h, l, tp2, tol) =>
+    isBull ? (h >= (tp2 - tol)) : (l <= (tp2 + tol))
+
+isHitSLBar(isBull, h, l, sl, tol) =>
+    isBull ? (l <= (sl + tol)) : (h >= (sl - tol))
 
 scoreNear(v, target) =>
     float err = math.abs(v - target) / math.max(math.abs(target), syminfo.mintick)
@@ -265,26 +286,32 @@ pushSwing(pBar, pPrice, pType) =>
     changed
 
 scanSlot(len, pos) =>
-    len * 5 + pos
+    len * scanPivotDepth + pos
 
 shiftScanState(len) =>
-    int d4 = scanSlot(len, 4), s3 = scanSlot(len, 3)
-    int d3 = scanSlot(len, 3), s2 = scanSlot(len, 2)
-    int d2 = scanSlot(len, 2), s1 = scanSlot(len, 1)
-    int d1 = scanSlot(len, 1), s0 = scanSlot(len, 0)
-    array.set(msPrice, d4, array.get(msPrice, s3))
-    array.set(msBar, d4, array.get(msBar, s3))
-    array.set(msType, d4, array.get(msType, s3))
-    array.set(msPrice, d3, array.get(msPrice, s2))
-    array.set(msBar, d3, array.get(msBar, s2))
-    array.set(msType, d3, array.get(msType, s2))
-    array.set(msPrice, d2, array.get(msPrice, s1))
-    array.set(msBar, d2, array.get(msBar, s1))
-    array.set(msType, d2, array.get(msType, s1))
-    array.set(msPrice, d1, array.get(msPrice, s0))
-    array.set(msBar, d1, array.get(msBar, s0))
-    array.set(msType, d1, array.get(msType, s0))
+    int pos = scanPivotDepth - 1
+    while pos > 0
+        int dst = scanSlot(len, pos)
+        int src = scanSlot(len, pos - 1)
+        array.set(msPrice, dst, array.get(msPrice, src))
+        array.set(msBar, dst, array.get(msBar, src))
+        array.set(msType, dst, array.get(msType, src))
+        pos -= 1
     0
+
+candidatePivotPos(combo, idx) =>
+    if combo == 0
+        idx
+    else if combo == 1
+        idx < 4 ? idx : 5
+    else if combo == 2
+        idx < 3 ? idx : idx + 1
+    else if combo == 3
+        idx < 2 ? idx : idx + 1
+    else if combo == 4
+        idx == 0 ? 0 : idx + 1
+    else
+        idx + 1
 
 validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, useAbNear, abNear, abLow, abHigh, bcLow, bcHigh, cdLow, cdHigh, useAdNear, adNear, adLow, adHigh) =>
     bool okAB = useAbNear ? nearTol(r_ab_xa, abNear) : inRangeTol(r_ab_xa, abLow, abHigh)
@@ -356,32 +383,39 @@ validateShark(isBull, pX, pA, pB, pC, pD, XA, r_ab_xa, r_bc_ab, r_cd_bc, r_xd_xa
     float przLow = na
     float przHigh = na
     float OX = math.abs(pA - pX)
-    float shTol = math.max(ratioTolerance, 0.06)
-    bool refMode = sharkLogicMode == "Reference (AB/XA+BC/AB+CD/BC+XD/XA)"
+    float shTol = math.max(ratioTolerance, 0.08)
+    float otherCompletion = completionRatio < 1.0 ? 1.13 : 0.886
+    bool bInsideXA = isInsideXA(pX, pA, pB)
+    // keep backward compatibility for previously saved input value string
+    bool refMode = sharkLogicMode == "Reference (XB/XA+AC/XA+BD/XA+XD/XA)" or sharkLogicMode == "Reference (XB/XA+AC/XA+BD/BC+XD/XA)" or sharkLogicMode == "Reference (AB/XA+BC/AB+CD/BC+XD/XA)"
     if refMode
-        // Reference style (like screenshots): AB/XA, BC/AB, CD/BC, XD/XA.
+        // Reference style from provided rule card:
+        // XB/XA 0.382~0.618, AC/XA 1.13~1.618, BD/XA 1.618~2.24, XD/XA 0.886~1.13.
         float r_xb_xa = math.abs(pB - pX) / math.max(XA, syminfo.mintick)
-        bool okB_ab = inRange(r_ab_xa, 0.382 * (1.0 - shTol), 0.618 * (1.0 + shTol))
-        bool okB_xb = inRange(r_xb_xa, 0.382 * (1.0 - shTol), 0.618 * (1.0 + shTol))
-        bool okB = okB_ab or okB_xb
-        bool okC = inRange(r_bc_ab, 1.13 * (1.0 - shTol), 2.0 * (1.0 + shTol))
-        bool okCD = inRange(r_cd_bc, 1.13 * (1.0 - shTol), 2.24 * (1.0 + shTol))
-        bool okD = near(r_xd_xa, completionRatio, shTol)
-        bool cBreakA = isBull ? (pC > pA) : (pC < pA)
-        bool bBreakX = isBull ? (pB < pX) : (pB > pX)
-        bool structureOK = cBreakA or bBreakX
-        if okB and okC and okCD and okD and structureOK
-            float dTargetExt = isBull ? (pX - XA * completionRatio) : (pX + XA * completionRatio) // outside X
-            float dTargetRet = isBull ? (pX + XA * completionRatio) : (pX - XA * completionRatio) // inside XA
-            bool inExt = inRange(pD, dTargetExt - XA * shTol, dTargetExt + XA * shTol)
-            bool inRet = inRange(pD, dTargetRet - XA * shTol, dTargetRet + XA * shTol)
-            if inExt or inRet
-                float dTarget = inExt ? dTargetExt : dTargetRet
-                przLow := dTarget - XA * shTol
-                przHigh := dTarget + XA * shTol
+        float r_ac_xa = math.abs(pC - pA) / math.max(XA, syminfo.mintick)
+        float r_xc_xa = math.abs(pC - pX) / math.max(XA, syminfo.mintick)
+        float r_bd_xa = math.abs(pD - pB) / math.max(XA, syminfo.mintick)
+        float r_bd_bc = math.abs(pD - pB) / math.max(math.abs(pC - pB), syminfo.mintick)
+        float xdMid = (0.886 + 1.13) * 0.5
+        float xdLow = completionRatio < 1.0 ? 0.886 * (1.0 - shTol) : xdMid
+        float xdHigh = completionRatio < 1.0 ? xdMid : 1.13 * (1.0 + shTol)
+        bool okXB = inRange(r_xb_xa, 0.382 * (1.0 - shTol), 0.618 * (1.0 + shTol))
+        bool okAC = inRange(r_ac_xa, 1.13 * (1.0 - shTol), 1.618 * (1.0 + shTol)) or inRange(r_xc_xa, 1.13 * (1.0 - shTol), 1.618 * (1.0 + shTol))
+        bool okBD = inRange(r_bd_xa, 1.618 * (1.0 - shTol), 2.24 * (1.0 + shTol)) or inRange(r_bd_bc, 1.618 * (1.0 - shTol), 2.24 * (1.0 + shTol))
+        bool okD = inRange(r_xd_xa, xdLow, xdHigh)
+        bool cBeyondA = isBull ? (pC > pA) : (pC < pA)
+        if bInsideXA and okXB and okAC and okBD and okD and cBeyondA
+            float dDir = pD >= pX ? 1.0 : -1.0
+            float dTargetLow = pX + dDir * XA * xdLow
+            float dTargetHigh = pX + dDir * XA * xdHigh
+            [dZoneLow, dZoneHigh] = zoneSort(dTargetLow, dTargetHigh)
+            przLow := dZoneLow
+            przHigh := dZoneHigh
+            if inRange(pD, przLow, przHigh)
                 matched := true
-                float bScore = math.max(scoreRange(r_ab_xa, 0.382, 0.618), scoreRange(r_xb_xa, 0.382, 0.618))
-                float rs = (bScore + scoreRange(r_bc_ab, 1.13, 2.0) + scoreRange(r_cd_bc, 1.13, 2.24) + scoreNear(r_xd_xa, completionRatio)) / 4.0
+                float acScore = math.max(scoreRange(r_ac_xa, 1.13, 1.618), scoreRange(r_xc_xa, 1.13, 1.618))
+                float bdScore = math.max(scoreRange(r_bd_xa, 1.618, 2.24), scoreRange(r_bd_bc, 1.618, 2.24))
+                float rs = (scoreRange(r_xb_xa, 0.382, 0.618) + acScore + bdScore + scoreRange(r_xd_xa, 0.886, 1.13)) / 4.0
                 score := 0.8 * rs + 0.2 * timeScore
     else
         // Classic OX mode.
@@ -391,11 +425,16 @@ validateShark(isBull, pX, pA, pB, pC, pD, XA, r_ab_xa, r_bc_ab, r_cd_bc, r_xd_xa
         float r_d_ox_o = math.abs(pD - pX) / math.max(OX, syminfo.mintick)  // D / OX (O-anchor)
         bool okB = inRange(r_b_ox, 1.13 * (1.0 - shTol), 1.618 * (1.0 + shTol))
         bool okC = inRange(r_c_ab, 1.618 * (1.0 - shTol), 2.24 * (1.0 + shTol))
+        float dErrX = math.abs(r_d_ox_x - completionRatio)
+        float dErrO = math.abs(r_d_ox_o - completionRatio)
+        float dErrXOther = math.abs(r_d_ox_x - otherCompletion)
+        float dErrOOther = math.abs(r_d_ox_o - otherCompletion)
+        bool closerToThis = math.min(dErrX, dErrO) <= math.min(dErrXOther, dErrOOther)
         bool okDX = near(r_d_ox_x, completionRatio, shTol)
         bool okDO = near(r_d_ox_o, completionRatio, shTol)
         bool okD = okDX or okDO
         bool bBreakX = isBull ? (pC > pA) : (pC < pA)
-        if okB and okC and okD and bBreakX
+        if bInsideXA and okB and okC and okD and closerToThis and bBreakX
             float dTargetX = pA + (pD >= pA ? 1.0 : -1.0) * OX * completionRatio
             float dTargetO = pX + (pD >= pX ? 1.0 : -1.0) * OX * completionRatio
             float errX = math.abs(r_d_ox_x - completionRatio)
@@ -459,16 +498,17 @@ replayTradeUntilPrevBar(isBull, tD, przLow, przHigh, tp1, tp2, sl) =>
     bool started = false
     bool tp1Done = false
     int outcome = 0
+    float tol = hitTol()
     int maxOff = math.min(math.max(bar_index - tD, 0), 4998)
     int off = maxOff
     while off >= 1 and outcome == 0
-        bool inPrz = high[off] >= przLow and low[off] <= przHigh
+        bool inPrz = isInPrzBar(high[off], low[off], przLow, przHigh, tol)
         if not started and inPrz
             started := true
         if started
-            bool hitTP1 = isBull ? (high[off] >= tp1) : (low[off] <= tp1)
-            bool hitTP2 = isBull ? (high[off] >= tp2) : (low[off] <= tp2)
-            bool hitSL = isBull ? (low[off] <= sl) : (high[off] >= sl)
+            bool hitTP1 = isHitTP1Bar(isBull, high[off], low[off], tp1, tol)
+            bool hitTP2 = isHitTP2Bar(isBull, high[off], low[off], tp2, tol)
+            bool hitSL = isHitSLBar(isBull, high[off], low[off], sl, tol)
             if hitSL and (hitTP1 or hitTP2) and not tp1Done
                 outcome := 3
             else
@@ -483,6 +523,47 @@ replayTradeUntilPrevBar(isBull, tD, przLow, przHigh, tp1, tp2, sl) =>
         off -= 1
     [started, tp1Done, outcome]
 
+calcLabelStatus(isBull, tD, przLow, przHigh, tp1, tp2, sl) =>
+    bool started = false
+    bool tp1Done = false
+    bool pierced = false
+    int outcome = 0 // 0=open, 1=SL, 2=TP, 3=pierced
+    float tol = hitTol()
+    int maxOff = math.min(math.max(bar_index - tD, 0), 4998)
+    int off = maxOff
+    while off >= 0 and outcome == 0
+        bool inPrz = isInPrzBar(high[off], low[off], przLow, przHigh, tol)
+        if not started and inPrz
+            started := true
+        if started
+            bool hitTP1 = isHitTP1Bar(isBull, high[off], low[off], tp1, tol)
+            bool hitTP2 = isHitTP2Bar(isBull, high[off], low[off], tp2, tol)
+            bool hitSL = isHitSLBar(isBull, high[off], low[off], sl, tol)
+            bool ambiguous = hitSL and (hitTP1 or hitTP2) and not tp1Done
+            if ambiguous
+                pierced := true
+                outcome := 3
+            else
+                if hitTP1 and not tp1Done
+                    tp1Done := true
+                if hitTP2
+                    outcome := 2
+                else if hitSL
+                    outcome := tp1Done ? 2 : 1
+        off -= 1
+    outcome == 1 ? "SL" : outcome == 2 ? "TP" : outcome == 3 ? "貫穿" : started ? "進行中" : "未啟動"
+
+buildTradeLabelText(head, body, status) =>
+    head + "[" + status + "] " + body
+
+updateTradeLabelStatusAt(i, status) =>
+    if i >= 0 and i < array.size(trLabelRef)
+        label lb = array.get(trLabelRef, i)
+        string head = array.get(trLabelHead, i)
+        string body = array.get(trLabelBody, i)
+        label.set_text(lb, buildTradeLabelText(head, body, status))
+    0
+
 removeTradeAt(i) =>
     array.remove(trKey, i)
     array.remove(trPattern, i)
@@ -495,6 +576,9 @@ removeTradeAt(i) =>
     array.remove(trTP2, i)
     array.remove(trStarted, i)
     array.remove(trTP1Hit, i)
+    array.remove(trLabelRef, i)
+    array.remove(trLabelHead, i)
+    array.remove(trLabelBody, i)
     0
 
 processTrades() =>
@@ -503,6 +587,7 @@ processTrades() =>
     bool evtTP2 = false
     bool evtSL = false
     string msg = ""
+    float tol = hitTol()
     if array.size(trKey) > 0
         for i = array.size(trKey) - 1 to 0
             string pn = array.get(trPattern, i)
@@ -516,23 +601,25 @@ processTrades() =>
             bool started = array.get(trStarted, i)
             bool tp1Done = array.get(trTP1Hit, i)
 
-            if not started and high >= przL and low <= przH
+            if not started and isInPrzBar(high, low, przL, przH, tol)
                 array.set(trStarted, i, true)
                 evtPrz := true
                 msg := "[" + (isBull ? "Bullish " : "Bearish ") + pn + "] Enter PRZ @ " + str.tostring(entry, format.mintick)
 
-            bool hitTP1 = isBull ? (high >= tp1) : (low <= tp1)
-            bool hitTP2 = isBull ? (high >= tp2) : (low <= tp2)
-            bool hitSL = isBull ? (low <= sl) : (high >= sl)
+            bool hitTP1 = isHitTP1Bar(isBull, high, low, tp1, tol)
+            bool hitTP2 = isHitTP2Bar(isBull, high, low, tp2, tol)
+            bool hitSL = isHitSLBar(isBull, high, low, sl, tol)
 
             if array.get(trStarted, i)
                 if hitSL and (hitTP1 or hitTP2) and not tp1Done
                     // ambiguous pierce bar
+                    updateTradeLabelStatusAt(i, "貫穿")
                     removeTradeAt(i)
                 else
                     if hitTP1 and not tp1Done
                         statAddTP1(pn)
                         array.set(trTP1Hit, i, true)
+                        updateTradeLabelStatusAt(i, "TP")
                         evtTP1 := true
                         msg := "[" + (isBull ? "Bullish " : "Bearish ") + pn + "] TP1 hit @ " + str.tostring(tp1, format.mintick)
 
@@ -540,17 +627,21 @@ processTrades() =>
                         if not array.get(trTP1Hit, i)
                             statAddTP1(pn)
                         statAddTP2(pn)
+                        updateTradeLabelStatusAt(i, "TP")
                         evtTP2 := true
                         msg := "[" + (isBull ? "Bullish " : "Bearish ") + pn + "] TP2 hit @ " + str.tostring(tp2, format.mintick)
                         removeTradeAt(i)
-                    else if hitSL
-                        if array.get(trTP1Hit, i)
-                            removeTradeAt(i)
-                        else
-                            statAddSL(pn)
-                            evtSL := true
-                            msg := "[" + (isBull ? "Bullish " : "Bearish ") + pn + "] SL hit @ " + str.tostring(sl, format.mintick)
-                            removeTradeAt(i)
+                    else
+                        if hitSL
+                            if array.get(trTP1Hit, i)
+                                updateTradeLabelStatusAt(i, "TP")
+                                removeTradeAt(i)
+                            else
+                                statAddSL(pn)
+                                updateTradeLabelStatusAt(i, "SL")
+                                evtSL := true
+                                msg := "[" + (isBull ? "Bullish " : "Bearish ") + pn + "] SL hit @ " + str.tostring(sl, format.mintick)
+                                removeTradeAt(i)
     [evtPrz, evtTP1, evtTP2, evtSL, msg]
 
 renderStats() =>
@@ -593,13 +684,14 @@ int scanStep = math.max(1, scanRangeStep)
 
 for len = scanFrom to scanTo by scanStep
     if len <= scanLenCap
-        int effLen = math.max(len, math.max(pivotLeftBars, pivotRightBars))
-        float ph = ta.pivothigh(high, effLen, effLen)
-        float pl = ta.pivotlow(low, effLen, effLen)
+        int rightLen = math.max(len, pivotRightBars)
+        int leftLen = math.max(1, pivotLeftBars)
+        float ph = ta.pivothigh(high, leftLen, rightLen)
+        float pl = ta.pivotlow(low, leftLen, rightLen)
         if not na(ph) or not na(pl)
             int currType = not na(ph) ? 1 : -1
             float currPrice = not na(ph) ? ph : pl
-            int currBar = bar_index - effLen
+            int currBar = bar_index - rightLen
             int lastType = array.get(msLastType, len)
             int slot0 = scanSlot(len, 0)
             if currType == lastType
@@ -639,8 +731,9 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
 
         bool allow = not array.includes(emittedKeys, key)
         if allow and array.size(keepBull) > 0
-            int dedupeBars = math.max(pivotRightBars * 2, math.max(1, scanRangeStep) * 2)
-            float dedupeEntryTol = math.max(0.005, ratioTolerance * 0.5)
+            bool isSharkPattern = pn == "Shark 0.886" or pn == "Shark 1.13"
+            int dedupeBars = isSharkPattern ? 1 : math.max(pivotRightBars * 2, math.max(1, scanRangeStep) * 2)
+            float dedupeEntryTol = isSharkPattern ? math.max(0.0005, ratioTolerance * 0.08) : math.max(0.005, ratioTolerance * 0.5)
             for i = array.size(keepBull) - 1 to 0
                 bool sameSide = array.get(keepBull, i) == isBull
                 bool samePn = array.get(keepPn, i) == pn
@@ -652,6 +745,7 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
         if allow
             color c = patternColor(pn, isBull)
             int tx = tD + projectionBars
+            string labelStatus = calcLabelStatus(isBull, tD, przLow, przHigh, tp1, tp2, sl)
             line.new(tX, pX, tA, pA, color=c, width=2)
             line.new(tA, pA, tB, pB, color=c, width=2)
             line.new(tB, pB, tC, pC, color=c, width=2)
@@ -665,26 +759,53 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
                 float BC_r = math.abs(pC - pB)
                 float CD_r = math.abs(pD - pC)
                 float AD_r = math.abs(pD - pA)
+                float XB_r = math.abs(pB - pX)
+                float AC_r = math.abs(pC - pA)
+                float XD_r = math.abs(pD - pX)
+                float BD_r = math.abs(pD - pB)
                 float rAB = AB_r / math.max(XA_r, syminfo.mintick)   // AB / XA
                 float rBC = BC_r / math.max(AB_r, syminfo.mintick)   // BC / AB
                 float rCD = CD_r / math.max(BC_r, syminfo.mintick)   // CD / BC
                 float rAD = AD_r / math.max(XA_r, syminfo.mintick)   // AD / XA
+                float rXB = XB_r / math.max(XA_r, syminfo.mintick)   // XB / XA
+                float rACDirect = AC_r / math.max(XA_r, syminfo.mintick)
+                float rXC = math.abs(pC - pX) / math.max(XA_r, syminfo.mintick)
+                float acMid = (1.13 + 1.618) * 0.5
+                float rAC = math.abs(rACDirect - acMid) <= math.abs(rXC - acMid) ? rACDirect : rXC
+                float rXD = XD_r / math.max(XA_r, syminfo.mintick)   // XD / XA
+                float rBDXa = BD_r / math.max(XA_r, syminfo.mintick)
+                float rBDBc = BD_r / math.max(BC_r, syminfo.mintick)
+                float bdMid = (1.618 + 2.24) * 0.5
+                float rBD = math.abs(rBDXa - bdMid) <= math.abs(rBDBc - bdMid) ? rBDXa : rBDBc
+                bool isSharkPn = pn == "Shark 0.886" or pn == "Shark 1.13"
 
                 int mXB = int(math.round((tX + tB) * 0.5))
                 int mAC = int(math.round((tA + tC) * 0.5))
                 int mCD = int(math.round((tC + tD) * 0.5))
                 int mXD = int(math.round((tX + tD) * 0.5))
+                int mBD = int(math.round((tB + tD) * 0.5))
 
                 float yXB = (pX + pB) * 0.5
                 float yAC = (pA + pC) * 0.5
                 float yCD = (pC + pD) * 0.5
                 float yXD = (pX + pD) * 0.5
+                float yBD = (pB + pD) * 0.5
 
-                line.new(tX, pX, tD, pD, color=color.new(c, 80), style=line.style_dotted)
-                label.new(mXB, yXB, fmtRatio(rAB), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
-                label.new(mAC, yAC, fmtRatio(rBC), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
-                label.new(mCD, yCD, fmtRatio(rCD), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
-                label.new(mXD, yXD, fmtRatio(rAD), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                if isSharkPn
+                    label.new(mXB, yXB, fmtRatio(rXB), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    label.new(mAC, yAC, fmtRatio(rAC), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    line.new(tX, pX, tD, pD, color=color.new(c, 80), style=line.style_dotted)
+                    line.new(tB, pB, tD, pD, color=color.new(c, 80), style=line.style_dotted)
+                    label.new(mXD, yXD, fmtRatio(rXD), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    label.new(mBD, yBD, fmtRatio(rBD), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                else
+                    label.new(mXB, yXB, fmtRatio(rAB), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    label.new(mAC, yAC, fmtRatio(rBC), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    label.new(mCD, yCD, fmtRatio(rCD), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    line.new(tX, pX, tD, pD, color=color.new(c, 80), style=line.style_dotted)
+                    line.new(tB, pB, tD, pD, color=color.new(c, 80), style=line.style_dotted)
+                    label.new(mXD, yXD, fmtRatio(rAD), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
+                    label.new(mBD, yBD, fmtRatio(BD_r / math.max(BC_r, syminfo.mintick)), style=label.style_none, textcolor=color.new(c, 0), size=size.tiny)
 
             if showPRZ
                 box.new(tD, przHigh, tx, przLow, border_color=color.new(c, 0), bgcolor=color.new(c, 86))
@@ -699,13 +820,14 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
                 if showTP3
                     line.new(tD, tp3, tx, tp3, color=color.new(color.yellow, 0), style=line.style_dashed)
 
-            string title = "[" + (isBull ? "Bullish " : "Bearish ") + pn + "]"
-            string txt = title + " " + validationType(pn) + (showScore ? (" (" + str.tostring(score, "#.0") + ")") : "")
-            txt += "\nE " + str.tostring(entry, format.mintick) + " | SL " + str.tostring(sl, format.mintick)
-            txt += "\nTP1 " + str.tostring(tp1, format.mintick) + " | TP2 " + str.tostring(tp2, format.mintick)
+            string labelHead = "[" + (isBull ? "Bullish " : "Bearish ") + pn + "]"
+            string labelBody = validationType(pn) + (showScore ? (" (" + str.tostring(score, "#.0") + ")") : "")
+            labelBody += "\nE " + str.tostring(entry, format.mintick) + " | SL " + str.tostring(sl, format.mintick)
+            labelBody += "\nTP1 " + str.tostring(tp1, format.mintick) + " | TP2 " + str.tostring(tp2, format.mintick)
             if showTP3
-                txt += " | TP3 " + str.tostring(tp3, format.mintick)
-            label.new(tD, pD, txt, style=isBull ? label.style_label_up : label.style_label_down, color=color.new(c, 78), textcolor=color.white, size=size.small)
+                labelBody += " | TP3 " + str.tostring(tp3, format.mintick)
+            string txt = buildTradeLabelText(labelHead, labelBody, labelStatus)
+            label patternLb = label.new(tD, pD, txt, style=isBull ? label.style_label_up : label.style_label_down, color=color.new(c, 78), textcolor=color.white, size=size.small)
 
             array.push(emittedKeys, key)
             array.push(keepBull, isBull)
@@ -745,17 +867,20 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
                     array.push(trSL, sl)
                     array.push(trTP1, tp1)
                     array.push(trTP2, tp2)
-                    startedNow := histStarted or (high >= przLow and low <= przHigh)
+                    startedNow := histStarted or isInPrzBar(high, low, przLow, przHigh, hitTol())
                     tp1Now := histTP1
                     array.push(trStarted, startedNow)
                     array.push(trTP1Hit, tp1Now)
+                    array.push(trLabelRef, patternLb)
+                    array.push(trLabelHead, labelHead)
+                    array.push(trLabelBody, labelBody)
             statAddTotal(pn)
 
             created := true
             eBull := isBull
             eBear := not isBull
             ePrz := startedNow
-            msg := title + " D=" + str.tostring(pD, format.mintick) + " SL=" + str.tostring(sl, format.mintick) + " TP1=" + str.tostring(tp1, format.mintick) + " TP2=" + str.tostring(tp2, format.mintick)
+            msg := labelHead + " D=" + str.tostring(pD, format.mintick) + " SL=" + str.tostring(sl, format.mintick) + " TP1=" + str.tostring(tp1, format.mintick) + " TP2=" + str.tostring(tp2, format.mintick)
 
     [created, eBull, eBear, ePrz, msg]
 
@@ -1029,6 +1154,106 @@ for lenScan = scanFrom to scanTo by scanStep
                         evtEnterPRZ := evtEnterPRZ or ep
                         if cr
                             evtMsg := mmsg
+
+// Extra Shark scan: keep 6 pivots per length and test all 5-point combinations.
+// This recovers valid Shark structures when one small intermediate pivot breaks the latest 5-point chain.
+for lenScan = scanFrom to scanTo by scanStep
+    if lenScan <= scanLenCap
+        for combo = 1 to scanComboCount - 1
+            int dPos = candidatePivotPos(combo, 0)
+            int cPos = candidatePivotPos(combo, 1)
+            int bPos = candidatePivotPos(combo, 2)
+            int aPos = candidatePivotPos(combo, 3)
+            int xPos = candidatePivotPos(combo, 4)
+            int slotX = scanSlot(lenScan, xPos)
+            if not na(array.get(msBar, slotX))
+                int tD = array.get(msBar, scanSlot(lenScan, dPos))
+                int tC = array.get(msBar, scanSlot(lenScan, cPos))
+                int tB = array.get(msBar, scanSlot(lenScan, bPos))
+                int tA = array.get(msBar, scanSlot(lenScan, aPos))
+                int tX = array.get(msBar, slotX)
+                float pD = array.get(msPrice, scanSlot(lenScan, dPos))
+                float pC = array.get(msPrice, scanSlot(lenScan, cPos))
+                float pB = array.get(msPrice, scanSlot(lenScan, bPos))
+                float pA = array.get(msPrice, scanSlot(lenScan, aPos))
+                float pX = array.get(msPrice, slotX)
+                int sD = array.get(msType, scanSlot(lenScan, dPos))
+                int sC = array.get(msType, scanSlot(lenScan, cPos))
+                int sB = array.get(msType, scanSlot(lenScan, bPos))
+                int sA = array.get(msType, scanSlot(lenScan, aPos))
+                int sX = array.get(msType, slotX)
+
+                bool isBull = sX == -1 and sA == 1 and sB == -1 and sC == 1 and sD == -1
+                bool isBear = sX == 1 and sA == -1 and sB == 1 and sC == -1 and sD == 1
+
+                if isBull or isBear
+                    bool swingPriceOK = isBull ? (pA > pX and pB < pA and pC > pB and pD < pC) : (pA < pX and pB > pA and pC < pB and pD > pC)
+                    if swingPriceOK
+                        float XA = math.abs(pA - pX), AB = math.abs(pB - pA), BC = math.abs(pC - pB), CD = math.abs(pD - pC), XD = math.abs(pD - pX), XC = math.abs(pC - pX), AD = math.abs(pD - pA)
+                        if XA > syminfo.mintick and AB > syminfo.mintick and BC > syminfo.mintick and CD > syminfo.mintick and XC > syminfo.mintick
+                            float r_ab_xa = AB / XA, r_bc_ab = BC / AB, r_cd_bc = CD / BC, r_ad_xa = AD / XA, r_xd_xa = XD / XA, r_cd_xc = CD / XC, r_xc_xa = XC / XA
+                            float l1 = tA - tX, l2 = tB - tA, l3 = tC - tB, l4 = tD - tC
+                            float timeScore = calcTimeScore(l1, l2, l3, l4)
+                            bool passTime = true
+                            if useTimeSymmetry
+                                float mx = math.max(math.max(l1, l2), math.max(l3, l4))
+                                float mn = math.max(math.min(math.min(l1, l2), math.min(l3, l4)), 1.0)
+                                passTime := mx / mn <= maxLegBarRatio
+                            bool passLeg = true
+                            if useMinLegSize
+                                float minAmp = atrSeries * minLegATRMultiple
+                                passLeg := XA >= minAmp and AB >= minAmp and BC >= minAmp and CD >= minAmp
+
+                            if passTime and passLeg
+                                bool bestHit = false
+                                string bestPn = ""
+                                float bestSc = na
+                                float bestPL = na
+                                float bestPH = na
+
+                                if enableShark0886
+                                    [m, s, plzL, plzH] = validateShark(isBull, pX, pA, pB, pC, pD, XA, r_ab_xa, r_bc_ab, r_cd_bc, r_xd_xa, timeScore, 0.886)
+                                    if m
+                                        if showOnlyBestPattern
+                                            if not bestHit or s > bestSc
+                                                bestHit := true
+                                                bestPn := "Shark 0.886"
+                                                bestSc := s
+                                                bestPL := plzL
+                                                bestPH := plzH
+                                        else
+                                            [cr, eb, er, ep, mmsg] = emitPattern("Shark 0.886", isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, s, plzL, plzH)
+                                            evtNewBull := evtNewBull or eb
+                                            evtNewBear := evtNewBear or er
+                                            evtEnterPRZ := evtEnterPRZ or ep
+                                            if cr
+                                                evtMsg := mmsg
+
+                                if enableShark113
+                                    [m, s, plzL, plzH] = validateShark(isBull, pX, pA, pB, pC, pD, XA, r_ab_xa, r_bc_ab, r_cd_bc, r_xd_xa, timeScore, 1.13)
+                                    if m
+                                        if showOnlyBestPattern
+                                            if not bestHit or s > bestSc
+                                                bestHit := true
+                                                bestPn := "Shark 1.13"
+                                                bestSc := s
+                                                bestPL := plzL
+                                                bestPH := plzH
+                                        else
+                                            [cr, eb, er, ep, mmsg] = emitPattern("Shark 1.13", isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, s, plzL, plzH)
+                                            evtNewBull := evtNewBull or eb
+                                            evtNewBear := evtNewBear or er
+                                            evtEnterPRZ := evtEnterPRZ or ep
+                                            if cr
+                                                evtMsg := mmsg
+
+                                if showOnlyBestPattern and bestHit
+                                    [cr, eb, er, ep, mmsg] = emitPattern(bestPn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, bestSc, bestPL, bestPH)
+                                    evtNewBull := evtNewBull or eb
+                                    evtNewBear := evtNewBear or er
+                                    evtEnterPRZ := evtEnterPRZ or ep
+                                    if cr
+                                        evtMsg := mmsg
 
 [evPrz2, evTP1_2, evTP2_2, evSL2, msg2] = processTrades()
 evtEnterPRZ := evtEnterPRZ or evPrz2
