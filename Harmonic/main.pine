@@ -877,7 +877,7 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
 
     if okDraw
         [entry, sl, tp1, tp2, tp3] = calcLevels(pn, isBull, tD, pX, pA, pB, pC, pD, przLow, przHigh)
-        string key = str.tostring(tX) + "_" + str.tostring(tA) + "_" + str.tostring(tB) + "_" + str.tostring(tC) + "_" + str.tostring(tD) + "_" + (isBull ? "B" : "S") + "_" + pn
+        string key = potentialKey(pn, isBull, tX, tA, tB, tC)
 
         bool allow = not array.includes(emittedKeys, key)
         if allow and array.size(keepBull) > 0
