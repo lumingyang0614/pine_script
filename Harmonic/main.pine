@@ -48,6 +48,7 @@ useCandleConfirmation = input.bool(true, "Use Candle Confirmation (使用 K 棒�
 
 grpDisplay = "Display (顯示)"
 showPRZ = input.bool(true, "Show PRZ Zone (顯示 PRZ 區域)", group=grpDisplay)
+showPotentialPRZ = input.bool(true, "Show Potential PRZ (顯示潛在 PRZ)", group=grpDisplay)
 showSLTP = input.bool(true, "Show SL/TP Lines (顯示 SL/TP 線)", group=grpDisplay)
 showScore = input.bool(true, "Show Pattern Score (顯示型態分數)", group=grpDisplay)
 showRatioNumbers = input.bool(true, "Show Ratio Numbers (顯示比例數字)", group=grpDisplay)
@@ -103,6 +104,31 @@ var bool[] trTP1Hit = array.new_bool()
 var label[] trLabelRef = array.new_label()
 var string[] trLabelHead = array.new_string()
 var string[] trLabelBody = array.new_string()
+var string[] potKey = array.new_string()
+var string[] potPn = array.new_string()
+var bool[] potBull = array.new_bool()
+var int[] potTX = array.new_int()
+var int[] potTA = array.new_int()
+var int[] potTB = array.new_int()
+var int[] potTC = array.new_int()
+var float[] potPX = array.new_float()
+var float[] potPA = array.new_float()
+var float[] potPB = array.new_float()
+var float[] potPC = array.new_float()
+var float[] potPrzLow = array.new_float()
+var float[] potPrzHigh = array.new_float()
+var float[] potScore = array.new_float()
+var int[] potStartBar = array.new_int()
+var int[] potSeenBar = array.new_int()
+var line[] potLineXA = array.new_line()
+var line[] potLineAB = array.new_line()
+var line[] potLineBC = array.new_line()
+var line[] potLineXB = array.new_line()
+var line[] potLineAC = array.new_line()
+var line[] potLineCD = array.new_line()
+var box[] potBox = array.new_box()
+var label[] potLabel = array.new_label()
+var string[] blockedPotKeys = array.new_string()
 
 // ---------------- Utility ----------------
 inRange(value, low, high) =>
@@ -122,6 +148,9 @@ clamp01(v) =>
 
 fmtRatio(v) =>
     str.tostring(v, "#.###")
+
+potentialKey(pn, isBull, tX, tA, tB, tC) =>
+    pn + "_" + (isBull ? "B_" : "S_") + str.tostring(tX) + "_" + str.tostring(tA) + "_" + str.tostring(tB) + "_" + str.tostring(tC)
 
 hitTol() =>
     syminfo.mintick * hitToleranceTicks
@@ -191,6 +220,18 @@ candleConfirmAt(offset, isBull) =>
     if offset >= 0 and not na(close[offset]) and not na(open[offset]) and not na(close[offset + 1])
         ok := isBull ? (close[offset] > open[offset] and close[offset] > close[offset + 1]) : (close[offset] < open[offset] and close[offset] < close[offset + 1])
     ok
+
+confirmNow(isBull) =>
+    useCandleConfirmation ? candleConfirmAt(0, isBull) : (bar_index > 0 ? (isBull ? (close > open and close > close[1]) : (close < open and close < close[1])) : false)
+
+strongBodyBreakPrz(isBull, przLow, przHigh, tol) =>
+    float body = math.abs(close - open)
+    float barRange = math.max(high - low, syminfo.mintick)
+    bool strong = body / barRange >= 0.60
+    isBull ? (strong and open >= (przLow - tol) and close < (przLow - tol)) : (strong and open <= (przHigh + tol) and close > (przHigh + tol))
+
+potentialLabelText(pn, isBull) =>
+    "[" + (isBull ? "Bullish " : "Bearish ") + pn + "][Not Active]"
 
 patternColor(pn, isBull) =>
     if pn == "Gartley"
@@ -476,6 +517,113 @@ validateFiveO(isBull, pX, pB, pC, pD, AB, BC, CD, r_ab_xa, r_bc_ab, r_cd_bc, tim
             score := 0.7 * rs + 0.2 * cluster + 0.1 * timeScore
     [matched, score, przLow, przHigh]
 
+prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, useAbNear, abNear, abLow, abHigh, bcLow, bcHigh, cdLow, cdHigh, useAdNear, adNear, adLow, adHigh) =>
+    bool matched = false
+    float score = na
+    float przLow = na
+    float przHigh = na
+    bool okAB = useAbNear ? nearTol(r_ab_xa, abNear) : inRangeTol(r_ab_xa, abLow, abHigh)
+    bool okBC = inRangeTol(r_bc_ab, bcLow, bcHigh)
+    if okAB and okBC
+        float adR1 = useAdNear ? adNear : adLow
+        float adR2 = useAdNear ? adNear : adHigh
+        float adT1 = projAD(isBull, pA, XA, adR1)
+        float adT2 = projAD(isBull, pA, XA, adR2)
+        [adL, adH] = zoneSort(adT1, adT2)
+        if useAdNear
+            adL := adT1 - XA * ratioTolerance
+            adH := adT1 + XA * ratioTolerance
+        float cdT1 = projCD(isBull, pC, BC, cdLow)
+        float cdT2 = projCD(isBull, pC, BC, cdHigh)
+        [cdL, cdH] = zoneSort(cdT1, cdT2)
+        [okP, pLo, pHi] = zoneIntersect(adL, adH, cdL, cdH)
+        if okP
+            matched := true
+            przLow := pLo
+            przHigh := pHi
+            float rs = (useAbNear ? scoreNear(r_ab_xa, abNear) : scoreRange(r_ab_xa, abLow, abHigh))
+            rs += scoreRange(r_bc_ab, bcLow, bcHigh)
+            rs /= 2.0
+            float cluster = 100.0 * (1.0 - clamp01(math.abs(((adL + adH) * 0.5) - ((cdL + cdH) * 0.5)) / math.max(XA, syminfo.mintick)))
+            score := 0.65 * rs + 0.25 * cluster + 0.10 * timeScore
+    [matched, score, przLow, przHigh]
+
+prepareCypherPRZ(isBull, pX, pA, pC, XA, r_ab_xa, r_bc_ab, r_xc_xa, XC, timeScore) =>
+    bool matched = false
+    float score = na
+    float przLow = na
+    float przHigh = na
+    float cyTol = math.min(ratioTolerance, 0.05)
+    bool okAB = inRange(r_ab_xa, 0.382 * (1.0 - cyTol), 0.618 * (1.0 + cyTol))
+    bool okBC = inRange(r_bc_ab, 1.272 * (1.0 - cyTol), 1.414 * (1.0 + cyTol))
+    bool cInsideXA = isBull ? (pC > pX and pC < pA) : (pC < pX and pC > pA)
+    bool cOutsideXA = isBull ? (pC > pA) : (pC < pA)
+    bool refMode = cypherLogicMode == "Reference (C outside XA)"
+    bool okCRef = cOutsideXA and inRange(r_xc_xa, 1.272 * (1.0 - cyTol), 1.414 * (1.0 + cyTol))
+    bool okCCustom = cInsideXA and inRange(r_xc_xa, 0.382 * (1.0 - cyTol), 0.886 * (1.0 + cyTol))
+    bool okC = refMode ? okCRef : okCCustom
+    if okAB and okBC and okC
+        float dTarget = projCD(isBull, pC, XC, 0.786)
+        przLow := dTarget - XC * cyTol
+        przHigh := dTarget + XC * cyTol
+        matched := true
+        float rsC = refMode ? scoreRange(r_xc_xa, 1.272, 1.414) : scoreRange(r_xc_xa, 0.382, 0.886)
+        float rs = (scoreRange(r_ab_xa, 0.382, 0.618) + scoreRange(r_bc_ab, 1.272, 1.414) + rsC) / 3.0
+        score := 0.8 * rs + 0.2 * timeScore
+    [matched, score, przLow, przHigh]
+
+prepareSharkPRZ(isBull, pX, pA, pB, pC, XA, timeScore, completionRatio) =>
+    bool matched = false
+    float score = na
+    float przLow = na
+    float przHigh = na
+    float shTol = math.max(ratioTolerance, 0.08)
+    float r_xb_xa = math.abs(pB - pX) / math.max(XA, syminfo.mintick)
+    float r_ac_xa = math.abs(pC - pA) / math.max(XA, syminfo.mintick)
+    float r_xc_xa = math.abs(pC - pX) / math.max(XA, syminfo.mintick)
+    bool okXB = inRange(r_xb_xa, 0.382 * (1.0 - shTol), 0.618 * (1.0 + shTol))
+    bool okAC = inRange(r_ac_xa, 1.13 * (1.0 - shTol), 1.618 * (1.0 + shTol)) or inRange(r_xc_xa, 1.13 * (1.0 - shTol), 1.618 * (1.0 + shTol))
+    bool cBeyondA = isBull ? (pC > pA) : (pC < pA)
+    bool bInsideXA = isInsideXA(pX, pA, pB)
+    if bInsideXA and okXB and okAC and cBeyondA
+        float dTarget = isBull ? (pX - XA * completionRatio) : (pX + XA * completionRatio)
+        przLow := dTarget - XA * shTol
+        przHigh := dTarget + XA * shTol
+        float dMid = (przLow + przHigh) * 0.5
+        float BC = math.abs(pC - pB)
+        float r_bd_xa = math.abs(dMid - pB) / math.max(XA, syminfo.mintick)
+        float r_bd_bc = math.abs(dMid - pB) / math.max(BC, syminfo.mintick)
+        bool okBD = inRange(r_bd_xa, 1.618 * (1.0 - shTol), 2.24 * (1.0 + shTol)) or inRange(r_bd_bc, 1.618 * (1.0 - shTol), 2.24 * (1.0 + shTol))
+        if okBD
+            matched := true
+            float acScore = math.max(scoreRange(r_ac_xa, 1.13, 1.618), scoreRange(r_xc_xa, 1.13, 1.618))
+            float bdScore = math.max(scoreRange(r_bd_xa, 1.618, 2.24), scoreRange(r_bd_bc, 1.618, 2.24))
+            float rs = (scoreRange(r_xb_xa, 0.382, 0.618) + acScore + bdScore + scoreNear(completionRatio, completionRatio)) / 4.0
+            score := 0.8 * rs + 0.2 * timeScore
+    [matched, score, przLow, przHigh]
+
+prepareFiveOPRZ(isBull, pX, pB, pC, AB, BC, r_ab_xa, r_bc_ab, timeScore) =>
+    bool matched = false
+    float score = na
+    float przLow = na
+    float przHigh = na
+    float fTol = math.max(ratioTolerance, 0.06)
+    bool bBreakX = isBull ? (pB < pX) : (pB > pX)
+    bool ctxAB = inRange(r_ab_xa, 0.886 * (1.0 - fTol), 1.618 * (1.0 + fTol))
+    bool ctxBC = inRange(r_bc_ab, 1.272 * (1.0 - fTol), 2.618 * (1.0 + fTol))
+    bool sharkCtx = (bBreakX or ctxAB) and ctxBC
+    if sharkCtx
+        float t1 = projCD(isBull, pC, BC, 0.5)
+        float t2 = isBull ? (pC - AB) : (pC + AB)
+        [okP, pLo, pHi] = zoneIntersect(t1 - BC * fTol, t1 + BC * fTol, t2 - BC * fTol, t2 + BC * fTol)
+        if okP
+            matched := true
+            przLow := pLo
+            przHigh := pHi
+            float cluster = 100.0 * (1.0 - clamp01(math.abs(t1 - t2) / math.max(BC, syminfo.mintick)))
+            score := 0.7 * scoreRange(r_bc_ab, 1.272, 2.618) + 0.2 * cluster + 0.1 * timeScore
+    [matched, score, przLow, przHigh]
+
 calcLevels(pn, isBull, tD, pX, pA, pB, pC, pD, przLow, przHigh) =>
     float entry = pD
     // Avoid dynamic historical indexing (atrSeries[off]) to prevent
@@ -718,12 +866,14 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
     bool dInPrz = inRange(pD, przLow, przHigh)
     int dOff = bar_index - tD
     bool strictOk = true
-    if entryMode == "Strict"
+    if useCandleConfirmation
         strictOk := false
         if dOff >= 0 and dOff <= 4998
-            strictOk := useCandleConfirmation ? candleConfirmAt(dOff, isBull) : (bar_index > 0 ? (isBull ? (close > open and close > close[1]) : (close < open and close < close[1])) : false)
+            strictOk := candleConfirmAt(dOff, isBull)
+    else if entryMode == "Strict"
+        strictOk := bar_index > 0 ? (isBull ? (close > open and close > close[1]) : (close < open and close < close[1])) : false
     bool okEntry = dInPrz and strictOk
-    bool okDraw = dInPrz
+    bool okDraw = okEntry
 
     if okDraw
         [entry, sl, tp1, tp2, tp3] = calcLevels(pn, isBull, tD, pX, pA, pB, pC, pD, przLow, przHigh)
@@ -883,6 +1033,439 @@ emitPattern(pn, isBull, tX, tA, tB, tC, tD, pX, pA, pB, pC, pD, score, przLow, p
             msg := labelHead + " D=" + str.tostring(pD, format.mintick) + " SL=" + str.tostring(sl, format.mintick) + " TP1=" + str.tostring(tp1, format.mintick) + " TP2=" + str.tostring(tp2, format.mintick)
 
     [created, eBull, eBear, ePrz, msg]
+
+removePotentialAt(i) =>
+    line lxa = array.get(potLineXA, i)
+    line lab = array.get(potLineAB, i)
+    line lbc = array.get(potLineBC, i)
+    line lxb = array.get(potLineXB, i)
+    line lac = array.get(potLineAC, i)
+    line lcd = array.get(potLineCD, i)
+    box bx = array.get(potBox, i)
+    label lb = array.get(potLabel, i)
+    if not na(lxa)
+        line.delete(lxa)
+    if not na(lab)
+        line.delete(lab)
+    if not na(lbc)
+        line.delete(lbc)
+    if not na(lxb)
+        line.delete(lxb)
+    if not na(lac)
+        line.delete(lac)
+    if not na(lcd)
+        line.delete(lcd)
+    if not na(bx)
+        box.delete(bx)
+    if not na(lb)
+        label.delete(lb)
+    array.remove(potKey, i)
+    array.remove(potPn, i)
+    array.remove(potBull, i)
+    array.remove(potTX, i)
+    array.remove(potTA, i)
+    array.remove(potTB, i)
+    array.remove(potTC, i)
+    array.remove(potPX, i)
+    array.remove(potPA, i)
+    array.remove(potPB, i)
+    array.remove(potPC, i)
+    array.remove(potPrzLow, i)
+    array.remove(potPrzHigh, i)
+    array.remove(potScore, i)
+    array.remove(potStartBar, i)
+    array.remove(potSeenBar, i)
+    array.remove(potLineXA, i)
+    array.remove(potLineAB, i)
+    array.remove(potLineBC, i)
+    array.remove(potLineXB, i)
+    array.remove(potLineAC, i)
+    array.remove(potLineCD, i)
+    array.remove(potBox, i)
+    array.remove(potLabel, i)
+    0
+
+syncPotentialVisualAt(i) =>
+    if showPotentialPRZ
+        string pn = array.get(potPn, i)
+        bool isBull = array.get(potBull, i)
+        int tX = array.get(potTX, i), tA = array.get(potTA, i), tB = array.get(potTB, i), tC = array.get(potTC, i)
+        float pX = array.get(potPX, i), pA = array.get(potPA, i), pB = array.get(potPB, i), pC = array.get(potPC, i)
+        float przLow = array.get(potPrzLow, i), przHigh = array.get(potPrzHigh, i)
+        int leftBar = array.get(potStartBar, i)
+        float dMid = (przLow + przHigh) * 0.5
+        color c = patternColor(pn, isBull)
+        line lxa = array.get(potLineXA, i)
+        line lab = array.get(potLineAB, i)
+        line lbc = array.get(potLineBC, i)
+        line lxb = array.get(potLineXB, i)
+        line lac = array.get(potLineAC, i)
+        line lcd = array.get(potLineCD, i)
+        box bx = array.get(potBox, i)
+        label lb = array.get(potLabel, i)
+        if na(lxa)
+            lxa := line.new(tX, pX, tA, pA, color=color.new(c, 28), width=1)
+            lab := line.new(tA, pA, tB, pB, color=color.new(c, 28), width=1)
+            lbc := line.new(tB, pB, tC, pC, color=color.new(c, 28), width=1)
+            lxb := line.new(tX, pX, tB, pB, color=color.new(c, 82), style=line.style_dotted)
+            lac := line.new(tA, pA, tC, pC, color=color.new(c, 82), style=line.style_dotted)
+            lcd := line.new(tC, pC, leftBar, dMid, color=color.new(c, 70), style=line.style_dashed)
+            bx := box.new(leftBar, przHigh, leftBar + projectionBars, przLow, border_color=color.new(c, 18), bgcolor=color.new(c, 90))
+            lb := label.new(leftBar, dMid, potentialLabelText(pn, isBull), style=isBull ? label.style_label_up : label.style_label_down, color=color.new(c, 82), textcolor=color.white, size=size.tiny)
+            array.set(potLineXA, i, lxa)
+            array.set(potLineAB, i, lab)
+            array.set(potLineBC, i, lbc)
+            array.set(potLineXB, i, lxb)
+            array.set(potLineAC, i, lac)
+            array.set(potLineCD, i, lcd)
+            array.set(potBox, i, bx)
+            array.set(potLabel, i, lb)
+        else
+            line.set_xy1(lxa, tX, pX)
+            line.set_xy2(lxa, tA, pA)
+            line.set_xy1(lab, tA, pA)
+            line.set_xy2(lab, tB, pB)
+            line.set_xy1(lbc, tB, pB)
+            line.set_xy2(lbc, tC, pC)
+            line.set_xy1(lxb, tX, pX)
+            line.set_xy2(lxb, tB, pB)
+            line.set_xy1(lac, tA, pA)
+            line.set_xy2(lac, tC, pC)
+            line.set_xy1(lcd, tC, pC)
+            line.set_xy2(lcd, leftBar, dMid)
+            box.set_left(bx, leftBar)
+            box.set_right(bx, leftBar + projectionBars)
+            box.set_top(bx, przHigh)
+            box.set_bottom(bx, przLow)
+            label.set_x(lb, leftBar)
+            label.set_y(lb, dMid)
+            label.set_text(lb, potentialLabelText(pn, isBull))
+    0
+
+upsertPotentialPattern(pn, isBull, tX, tA, tB, tC, pX, pA, pB, pC, score, przLow, przHigh) =>
+    string key = potentialKey(pn, isBull, tX, tA, tB, tC)
+    if not array.includes(blockedPotKeys, key)
+        int found = -1
+        if array.size(potKey) > 0
+            for i = array.size(potKey) - 1 to 0
+                if array.get(potKey, i) == key
+                    found := i
+                    break
+        if found >= 0
+            array.set(potPrzLow, found, przLow)
+            array.set(potPrzHigh, found, przHigh)
+            array.set(potScore, found, score)
+            array.set(potSeenBar, found, bar_index)
+            syncPotentialVisualAt(found)
+        else
+            array.push(potKey, key)
+            array.push(potPn, pn)
+            array.push(potBull, isBull)
+            array.push(potTX, tX)
+            array.push(potTA, tA)
+            array.push(potTB, tB)
+            array.push(potTC, tC)
+            array.push(potPX, pX)
+            array.push(potPA, pA)
+            array.push(potPB, pB)
+            array.push(potPC, pC)
+            array.push(potPrzLow, przLow)
+            array.push(potPrzHigh, przHigh)
+            array.push(potScore, score)
+            array.push(potStartBar, bar_index)
+            array.push(potSeenBar, bar_index)
+            array.push(potLineXA, na)
+            array.push(potLineAB, na)
+            array.push(potLineBC, na)
+            array.push(potLineXB, na)
+            array.push(potLineAC, na)
+            array.push(potLineCD, na)
+            array.push(potBox, na)
+            array.push(potLabel, na)
+            syncPotentialVisualAt(array.size(potKey) - 1)
+    0
+
+confirmPotentialPattern(pn, isBull, tX, tA, tB, tC, pX, pA, pB, pC, pD) =>
+    float XA = math.abs(pA - pX), AB = math.abs(pB - pA), BC = math.abs(pC - pB), CD = math.abs(pD - pC), XC = math.abs(pC - pX), AD = math.abs(pD - pA)
+    float r_ab_xa = AB / math.max(XA, syminfo.mintick), r_bc_ab = BC / math.max(AB, syminfo.mintick), r_cd_bc = CD / math.max(BC, syminfo.mintick), r_ad_xa = AD / math.max(XA, syminfo.mintick), r_xd_xa = math.abs(pD - pX) / math.max(XA, syminfo.mintick), r_cd_xc = CD / math.max(XC, syminfo.mintick), r_xc_xa = XC / math.max(XA, syminfo.mintick)
+    float l1 = tA - tX, l2 = tB - tA, l3 = tC - tB, l4 = bar_index - tC
+    float timeScore = calcTimeScore(l1, l2, l3, math.max(l4, 1))
+    bool m = false
+    float s = na
+    float pl = na
+    float ph = na
+    if pn == "Gartley"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, true, 0.618, 0.0, 0.0, 0.382, 0.886, 1.13, 1.618, true, 0.786, 0.0, 0.0)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and isInsideXA(pX, pA, pD)
+    else if pn == "Deep Gartley"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, false, 0.0, 0.707, 0.786, 0.382, 0.886, 1.27, 1.618, true, 0.886, 0.0, 0.0)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and isInsideXA(pX, pA, pD)
+    else if pn == "Bat"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, false, 0.0, 0.382, 0.50, 0.382, 0.886, 1.618, 2.618, true, 0.886, 0.0, 0.0)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and r_ab_xa < 0.618 * (1.0 + ratioTolerance) and isInsideXA(pX, pA, pD)
+    else if pn == "Alternate Bat"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, true, 0.382, 0.0, 0.0, 0.382, 0.886, 2.0, 3.618, true, 1.13, 0.0, 0.0)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and r_ab_xa <= 0.382 * (1.0 + ratioTolerance) and isOutsideXSide(isBull, pX, pD)
+    else if pn == "Butterfly"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, true, 0.786, 0.0, 0.0, 0.382, 0.886, 1.618, 2.618, false, 0.0, 1.27, 1.618)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and isOutsideXSide(isBull, pX, pD)
+    else if pn == "Crab"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, false, 0.0, 0.382, 0.618, 0.382, 0.886, 2.24, 3.618, true, 1.618, 0.0, 0.0)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and isOutsideXSide(isBull, pX, pD)
+    else if pn == "Deep Crab"
+        [mm, ss, pll, phh] = validateXDBD(isBull, pA, pC, pD, XA, BC, r_ab_xa, r_bc_ab, r_cd_bc, r_ad_xa, timeScore, true, 0.886, 0.0, 0.0, 0.382, 0.886, 2.24, 3.618, true, 1.618, 0.0, 0.0)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and isOutsideXSide(isBull, pX, pD)
+    else if pn == "Cypher"
+        [mm, ss, pll, phh] = validateCypher(isBull, pX, pA, pC, pD, XA, r_ab_xa, r_bc_ab, r_xc_xa, r_xd_xa, r_cd_xc, XC, timeScore)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+        m := m and (cypherLogicMode == "Custom (C inside XA)" ? isInsideXA(pX, pA, pD) : true)
+    else if pn == "Shark 0.886"
+        [mm, ss, pll, phh] = validateShark(isBull, pX, pA, pB, pC, pD, XA, r_ab_xa, r_bc_ab, r_cd_bc, r_xd_xa, timeScore, 0.886)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+    else if pn == "Shark 1.13"
+        [mm, ss, pll, phh] = validateShark(isBull, pX, pA, pB, pC, pD, XA, r_ab_xa, r_bc_ab, r_cd_bc, r_xd_xa, timeScore, 1.13)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+    else
+        [mm, ss, pll, phh] = validateFiveO(isBull, pX, pB, pC, pD, AB, BC, CD, r_ab_xa, r_bc_ab, r_cd_bc, timeScore)
+        m := mm
+        s := ss
+        pl := pll
+        ph := phh
+    [m, s, pl, ph]
+
+scanPotentialXABC(isBull, tX, tA, tB, tC, pX, pA, pB, pC, timeScore, XA, AB, BC, XC, r_ab_xa, r_bc_ab, r_xc_xa) =>
+    bool bestHit = false
+    string bestPn = ""
+    float bestSc = na
+    float bestPL = na
+    float bestPH = na
+
+    if enableGartley
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, true, 0.618, 0.0, 0.0, 0.382, 0.886, 1.13, 1.618, true, 0.786, 0.0, 0.0)
+        float dMid = (pl + ph) * 0.5
+        if m and isInsideXA(pX, pA, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Gartley"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Gartley", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableDeepGartley
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, false, 0.0, 0.707, 0.786, 0.382, 0.886, 1.27, 1.618, true, 0.886, 0.0, 0.0)
+        float dMid = (pl + ph) * 0.5
+        if m and isInsideXA(pX, pA, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Deep Gartley"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Deep Gartley", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableBat
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, false, 0.0, 0.382, 0.50, 0.382, 0.886, 1.618, 2.618, true, 0.886, 0.0, 0.0)
+        float dMid = (pl + ph) * 0.5
+        if m and r_ab_xa < 0.618 * (1.0 + ratioTolerance) and isInsideXA(pX, pA, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Bat"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Bat", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableAltBat
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, true, 0.382, 0.0, 0.0, 0.382, 0.886, 2.0, 3.618, true, 1.13, 0.0, 0.0)
+        float dMid = (pl + ph) * 0.5
+        if m and r_ab_xa <= 0.382 * (1.0 + ratioTolerance) and isOutsideXSide(isBull, pX, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Alternate Bat"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Alternate Bat", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableButterfly
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, true, 0.786, 0.0, 0.0, 0.382, 0.886, 1.618, 2.618, false, 0.0, 1.27, 1.618)
+        float dMid = (pl + ph) * 0.5
+        if m and isOutsideXSide(isBull, pX, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Butterfly"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Butterfly", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableCrab
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, false, 0.0, 0.382, 0.618, 0.382, 0.886, 2.24, 3.618, true, 1.618, 0.0, 0.0)
+        float dMid = (pl + ph) * 0.5
+        if m and isOutsideXSide(isBull, pX, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Crab"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Crab", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableDeepCrab
+        [m, s, pl, ph] = prepareXDBDPotentialPRZ(isBull, pA, pC, XA, BC, r_ab_xa, r_bc_ab, timeScore, true, 0.886, 0.0, 0.0, 0.382, 0.886, 2.24, 3.618, true, 1.618, 0.0, 0.0)
+        float dMid = (pl + ph) * 0.5
+        if m and isOutsideXSide(isBull, pX, dMid)
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Deep Crab"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Deep Crab", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableCypher
+        [m, s, pl, ph] = prepareCypherPRZ(isBull, pX, pA, pC, XA, r_ab_xa, r_bc_ab, r_xc_xa, XC, timeScore)
+        float dMid = (pl + ph) * 0.5
+        bool cypherDOK = cypherLogicMode == "Custom (C inside XA)" ? isInsideXA(pX, pA, dMid) : true
+        if m and cypherDOK
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Cypher"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Cypher", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableShark0886
+        [m, s, pl, ph] = prepareSharkPRZ(isBull, pX, pA, pB, pC, XA, timeScore, 0.886)
+        if m
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Shark 0.886"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Shark 0.886", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableShark113
+        [m, s, pl, ph] = prepareSharkPRZ(isBull, pX, pA, pB, pC, XA, timeScore, 1.13)
+        if m
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "Shark 1.13"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("Shark 1.13", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if enableFiveO
+        [m, s, pl, ph] = prepareFiveOPRZ(isBull, pX, pB, pC, AB, BC, r_ab_xa, r_bc_ab, timeScore)
+        if m
+            if showOnlyBestPattern
+                if not bestHit or s > bestSc
+                    bestHit := true
+                    bestPn := "5-0"
+                    bestSc := s
+                    bestPL := pl
+                    bestPH := ph
+            else
+                upsertPotentialPattern("5-0", isBull, tX, tA, tB, tC, pX, pA, pB, pC, s, pl, ph)
+
+    if showOnlyBestPattern and bestHit
+        upsertPotentialPattern(bestPn, isBull, tX, tA, tB, tC, pX, pA, pB, pC, bestSc, bestPL, bestPH)
+    0
+
+processPotentialPatterns() =>
+    bool evtBull = false
+    bool evtBear = false
+    bool evtPrz = false
+    string msg = ""
+    float tol = hitTol()
+    if array.size(potKey) > 0
+        for i = array.size(potKey) - 1 to 0
+            bool stale = array.get(potSeenBar, i) != bar_index
+            if stale
+                removePotentialAt(i)
+            else
+                syncPotentialVisualAt(i)
+                bool isBull = array.get(potBull, i)
+                float przLow = array.get(potPrzLow, i)
+                float przHigh = array.get(potPrzHigh, i)
+                if strongBodyBreakPrz(isBull, przLow, przHigh, tol)
+                    array.push(blockedPotKeys, array.get(potKey, i))
+                    if array.size(blockedPotKeys) > 400
+                        array.shift(blockedPotKeys)
+                    removePotentialAt(i)
+                else if isInPrzBar(high, low, przLow, przHigh, tol) and confirmNow(isBull)
+                    float pDAct = isBull ? math.max(przLow, math.min(przHigh, low)) : math.max(przLow, math.min(przHigh, high))
+                    [m, s, pl, ph] = confirmPotentialPattern(array.get(potPn, i), isBull, array.get(potTX, i), array.get(potTA, i), array.get(potTB, i), array.get(potTC, i), array.get(potPX, i), array.get(potPA, i), array.get(potPB, i), array.get(potPC, i), pDAct)
+                    if m
+                        [cr, eb, er, ep, mmsg] = emitPattern(array.get(potPn, i), isBull, array.get(potTX, i), array.get(potTA, i), array.get(potTB, i), array.get(potTC, i), bar_index, array.get(potPX, i), array.get(potPA, i), array.get(potPB, i), array.get(potPC, i), pDAct, s, pl, ph)
+                        evtBull := evtBull or eb
+                        evtBear := evtBear or er
+                        evtPrz := evtPrz or ep
+                        if cr
+                            msg := mmsg
+                            removePotentialAt(i)
+    [evtBull, evtBear, evtPrz, msg]
 
 for lenScan = scanFrom to scanTo by scanStep
     int tD = na
@@ -1255,6 +1838,71 @@ for lenScan = scanFrom to scanTo by scanStep
                                     if cr
                                         evtMsg := mmsg
 
+for lenScan = scanFrom to scanTo by scanStep
+    int tC = na
+    int tB = na
+    int tA = na
+    int tX = na
+    float pC = na
+    float pB = na
+    float pA = na
+    float pX = na
+    int sC = 0
+    int sB = 0
+    int sA = 0
+    int sX = 0
+    if lenScan <= scanLenCap
+        int slot3 = scanSlot(lenScan, 3)
+        if not na(array.get(msBar, slot3))
+            tC := array.get(msBar, scanSlot(lenScan, 0))
+            tB := array.get(msBar, scanSlot(lenScan, 1))
+            tA := array.get(msBar, scanSlot(lenScan, 2))
+            tX := array.get(msBar, scanSlot(lenScan, 3))
+            pC := array.get(msPrice, scanSlot(lenScan, 0))
+            pB := array.get(msPrice, scanSlot(lenScan, 1))
+            pA := array.get(msPrice, scanSlot(lenScan, 2))
+            pX := array.get(msPrice, scanSlot(lenScan, 3))
+            sC := array.get(msType, scanSlot(lenScan, 0))
+            sB := array.get(msType, scanSlot(lenScan, 1))
+            sA := array.get(msType, scanSlot(lenScan, 2))
+            sX := array.get(msType, scanSlot(lenScan, 3))
+
+    bool isBullPot = sX == -1 and sA == 1 and sB == -1 and sC == 1
+    bool isBearPot = sX == 1 and sA == -1 and sB == 1 and sC == -1
+    if isBullPot or isBearPot
+        bool swingPriceOKPot = isBullPot ? (pA > pX and pB < pA and pC > pB) : (pA < pX and pB > pA and pC < pB)
+        if swingPriceOKPot
+            float XA = math.abs(pA - pX)
+            float AB = math.abs(pB - pA)
+            float BC = math.abs(pC - pB)
+            float XC = math.abs(pC - pX)
+            if XA > syminfo.mintick and AB > syminfo.mintick and BC > syminfo.mintick and XC > syminfo.mintick
+                float r_ab_xa = AB / XA
+                float r_bc_ab = BC / AB
+                float r_xc_xa = XC / XA
+                float l1 = tA - tX
+                float l2 = tB - tA
+                float l3 = tC - tB
+                float timeScore = calcTimeScore(l1, l2, l3, math.max(l3, 1.0))
+                bool passTime = true
+                if useTimeSymmetry
+                    float mx = math.max(l1, math.max(l2, l3))
+                    float mn = math.max(math.min(l1, math.min(l2, l3)), 1.0)
+                    passTime := mx / mn <= maxLegBarRatio
+                bool passLeg = true
+                if useMinLegSize
+                    float minAmp = atrSeries * minLegATRMultiple
+                    passLeg := XA >= minAmp and AB >= minAmp and BC >= minAmp
+                if passTime and passLeg
+                    scanPotentialXABC(isBullPot, tX, tA, tB, tC, pX, pA, pB, pC, timeScore, XA, AB, BC, XC, r_ab_xa, r_bc_ab, r_xc_xa)
+
+[evPotBull, evPotBear, evPotPrz, msgPot] = processPotentialPatterns()
+evtNewBull := evtNewBull or evPotBull
+evtNewBear := evtNewBear or evPotBear
+evtEnterPRZ := evtEnterPRZ or evPotPrz
+if msgPot != ""
+    evtMsg := msgPot
+
 [evPrz2, evTP1_2, evTP2_2, evSL2, msg2] = processTrades()
 evtEnterPRZ := evtEnterPRZ or evPrz2
 evtTP1 := evtTP1 or evTP1_2
@@ -1274,6 +1922,5 @@ alertcondition(evtSL, "SL Hit", "SL hit")
 
 if enableRuntimeAlert and evtMsg != ""
     alert(evtMsg, alert.freq_once_per_bar_close)
-
 
 
